@@ -1,14 +1,24 @@
 from flask import Flask, request
 import requests
+import os
 
 app = Flask(__name__)
 
 CONFIRMATION_TOKEN = '38afba8f'  # <- заменить, если токен VK изменится
-FRONTPAD_API_KEY = 'Hd64BzDZ8kDdsZRfa6diG8994SyzR65k92dAhFifSQi8B3eBYiNrfKr9sKy8FniEan4iTbsBREAdtFFbRftZTHY9he7Qyeeyt8Fba2ERs5YKzrNbz63dEKdNRar9ezyBt4EtQ8963YFk9enzabBEQEesFysKSNaaDFyeDyasdFFdKTBNZ4dAyiS3G8BnKBnb7KfA7fR9Nhdk5E2Rt5dQbZDHT4ZtsaykNDKGKrGiBKzsbi8zbaadZDNFtA'  # <- вставь сюда свой API-ключ
+FRONTPAD_API_KEY = os.getenv("FRONTPAD_API_KEY")
+VK_SECRET = os.getenv("VK_SECRET")
+
+if not FRONTPAD_API_KEY:
+    raise ValueError("FRONTPAD_API_KEY is not set in environment variables")
 
 @app.route('/', methods=['POST'])
 def vk_callback():
     data = request.get_json()
+
+    # 🔐 Проверка VK-секрета
+    if 'secret' in data and data['secret'] != VK_SECRET:
+        return 'access denied', 403
+
     if data['type'] == 'confirmation':
         return CONFIRMATION_TOKEN
     elif data['type'] == 'order_edit':
@@ -16,6 +26,7 @@ def vk_callback():
         phone = '79999999999'
         name = 'Клиент VK'
         items = order['items']
+
         mapped_items = {
             '10001': '123',
             '10002': '124'
@@ -39,7 +50,9 @@ def vk_callback():
             'flat': order.get('address', {}).get('apartment', '')
         }
         payload.update(item_fields)
+
         response = requests.post('https://app.frontpad.ru/api/index.php', data=payload)
         print('FrontPad response:', response.text)
         return 'ok'
+
     return 'unsupported'
