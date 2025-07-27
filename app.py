@@ -1,56 +1,63 @@
-from flask import Flask, request, Response
+from flask import Flask, request
 import requests
 import os
 import json
 
 app = Flask(__name__)
 
-# 🔐 Настройки
-CONFIRMATION_TOKEN = "f4256a8f"
-VK_SECRET = os.getenv("VK_SECRET")
+# 🔐 Переменные окружения
+CONFIRMATION_TOKEN = 'f4256a8f'  # VK → Callback API → строка подтверждения
 FRONTPAD_API_KEY = os.getenv("FRONTPAD_API_KEY")
+VK_SECRET = os.getenv("VK_SECRET")
 
-if not FRONTPAD_API_KEY:
-    raise ValueError("FRONTPAD_API_KEY is not set")
-if not VK_SECRET:
-    raise ValueError("VK_SECRET is not set")
-
-@app.route("/", methods=["POST"])
+@app.route('/', methods=['POST'])
 def vk_callback():
     data = request.get_json()
     print("📥 Запрос от VK:\n", json.dumps(data, ensure_ascii=False, indent=2))
 
-    if data.get("type") == "confirmation":
-        print("✅ Подтверждение сервера VK")
-        return Response(CONFIRMATION_TOKEN, content_type="text/plain")
+    # Проверка секрета
+    if 'secret' in data and data['secret'] != VK_SECRET:
+        print("⛔ Неверный секрет!")
+        return 'access denied', 403
 
-    if data.get("secret") != VK_SECRET:
-        print("❌ Неверный VK_SECRET")
-        return "access denied", 403
+    # Подтверждение сервера
+    if data['type'] == 'confirmation':
+        print("✅ Подтверждение сервера")
+        return CONFIRMATION_TOKEN
 
-    if data.get("type") == "order_edit":
-        order = data["object"]
-        phone = order.get("phone", "")
-        name = order.get("user_name", "Клиент из VK")
-        items = order.get("items", [])
+    # Обработка заказа
+    elif data['type'] == 'market_order_new':
+        order = data['object']
+        phone = order.get('recipient', {}).get('phone', '79999999999')
+        name = order.get('recipient', {}).get('name', 'Клиент VK')
+        items = order.get('items') or order.get('preview_order_items', [])
+
+        item_fields = {}
+        for idx, item in enumerate(items):
+            # В preview_order_items артикул — это item['item']['sku']
+            sku = item.get('item', {}).get('sku')
+            quantity = item.get('quantity', 1)
+
+            if not sku:
+                print(f"⚠️ Пропущен товар без артикула: {item}")
+                continue
+
+            item_fields[f'items[{idx}][id]'] = sku
+            item_fields[f'items[{idx}][quantity]'] = quantity
 
         payload = {
-            "request": "add_order",
-            "key": FRONTPAD_API_KEY,
-            "phone": phone,
-            "name": name,
-            "source": "VK"
+            'request': 'add_order',
+            'key': FRONTPAD_API_KEY,
+            'phone': phone,
+            'name': name,
+            'source': 'VK'
         }
+        payload.update(item_fields)
 
-        for idx, item in enumerate(items):
-            if str(item["item_id"]) == "123":
-                payload[f"items[{idx}][id]"] = "123"
-                payload[f"items[{idx}][quantity]"] = item.get("quantity", 1)
-
-        print("➡️ Отправляем заказ в FrontPad:\n", payload)
-        response = requests.post("https://app.frontpad.ru/api/index.php", data=payload)
+        print("📦 Отправляем в FrontPad:\n", payload)
+        response = requests.post('https://app.frontpad.ru/api/index.php', data=payload)
         print("🟢 Ответ от FrontPad:", response.text)
-        return "ok"
+        return 'ok'
 
-    print("⚠️ Необработанный тип:", data.get("type"))
-    return "unsupported"
+    print("⚠️ Необработанный тип:", data['type'])
+    return 'unsupported'
