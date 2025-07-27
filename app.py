@@ -1,12 +1,12 @@
-from flask import Flask, request
+from flask import Flask, request, Response
 import requests
 import os
 import json
 
 app = Flask(__name__)
 
-# 🔐 Значения из настроек
-CONFIRMATION_TOKEN = "f4256a8f"  # VK требует вернуть это при подтверждении
+# 🔐 Настройки
+CONFIRMATION_TOKEN = "f4256a8f"
 VK_SECRET = os.getenv("VK_SECRET")
 FRONTPAD_API_KEY = os.getenv("FRONTPAD_API_KEY")
 
@@ -18,19 +18,16 @@ if not VK_SECRET:
 @app.route("/", methods=["POST"])
 def vk_callback():
     data = request.get_json()
-    print("📥 Получен запрос от VK:\n", json.dumps(data, ensure_ascii=False, indent=2))
+    print("📥 Запрос от VK:\n", json.dumps(data, ensure_ascii=False, indent=2))
 
-    # ✅ Подтверждение сервера VK
     if data.get("type") == "confirmation":
         print("✅ Подтверждение сервера VK")
-        return CONFIRMATION_TOKEN
+        return Response(CONFIRMATION_TOKEN, content_type="text/plain")
 
-    # ⛔ Проверка секрета
     if data.get("secret") != VK_SECRET:
-        print("❌ Неверный VK_SECRET!")
+        print("❌ Неверный VK_SECRET")
         return "access denied", 403
 
-    # 📦 Обработка заказа
     if data.get("type") == "order_edit":
         order = data["object"]
         phone = order.get("phone", "")
@@ -45,7 +42,6 @@ def vk_callback():
             "source": "VK"
         }
 
-        # Обрабатываем только товар с item_id = 123
         for idx, item in enumerate(items):
             if str(item["item_id"]) == "123":
                 payload[f"items[{idx}][id]"] = "123"
@@ -54,9 +50,7 @@ def vk_callback():
         print("➡️ Отправляем заказ в FrontPad:\n", payload)
         response = requests.post("https://app.frontpad.ru/api/index.php", data=payload)
         print("🟢 Ответ от FrontPad:", response.text)
-
         return "ok"
 
-    # 🚫 Обработка остальных типов
-    print("⚠️ Неизвестный тип события:", data.get("type"))
+    print("⚠️ Необработанный тип:", data.get("type"))
     return "unsupported"
