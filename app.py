@@ -15,6 +15,8 @@ VK_SECRET = os.getenv("VK_SECRET")
 if not FRONTPAD_API_KEY:
     raise ValueError("FRONTPAD_API_KEY is not set")
 
+print("🟢 Flask сервер запущен и готов принимать POST-запросы от VK")
+
 @app.route('/', methods=['POST'])
 def vk_callback():
     data = request.get_json()
