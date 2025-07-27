@@ -4,29 +4,40 @@ import os
 
 app = Flask(__name__)
 
-CONFIRMATION_TOKEN = '38afba8f'  # <- заменить, если токен VK изменится
+# 🔐 Конфигурация
+CONFIRMATION_TOKEN = 'e31f246c'  # <-- вставлен токен подтверждения из VK
 FRONTPAD_API_KEY = os.getenv("FRONTPAD_API_KEY")
 VK_SECRET = os.getenv("VK_SECRET")
 
+# Проверка переменных окружения
 if not FRONTPAD_API_KEY:
-    raise ValueError("FRONTPAD_API_KEY is not set in environment variables")
+    raise ValueError("FRONTPAD_API_KEY is not set")
+if not VK_SECRET:
+    raise ValueError("VK_SECRET is not set")
 
 @app.route('/', methods=['POST'])
 def vk_callback():
     data = request.get_json()
+    print("📩 Входящий JSON от VK:", data)
 
-    # 🔐 Проверка VK-секрета
+    # Проверка VK_SECRET
     if 'secret' in data and data['secret'] != VK_SECRET:
+        print("❌ Неверный VK_SECRET")
         return 'access denied', 403
 
-    if data['type'] == 'confirmation':
+    # Подтверждение сервера VK
+    if data.get('type') == 'confirmation':
+        print("✅ Подтверждение сервера")
         return CONFIRMATION_TOKEN
-    elif data['type'] == 'order_edit':
-        order = data['object']
-        phone = '79999999999'
-        name = 'Клиент VK'
-        items = order['items']
 
+    # Обработка редактирования заказа
+    elif data.get('type') == 'order_edit':
+        order = data['object']
+        phone = '79999999999'  # Тестовый номер
+        name = 'Клиент VK'
+        items = order.get('items', [])
+
+        # Маппинг ID товаров VK → FrontPad
         mapped_items = {
             '10001': '123',
             '10002': '124'
@@ -34,11 +45,15 @@ def vk_callback():
 
         item_fields = {}
         for idx, item in enumerate(items):
-            fp_id = mapped_items.get(str(item['item_id']))
+            vk_id = str(item['item_id'])
+            fp_id = mapped_items.get(vk_id)
             if fp_id:
                 item_fields[f'items[{idx}][id]'] = fp_id
                 item_fields[f'items[{idx}][quantity]'] = item['quantity']
+            else:
+                print(f"⚠️ Неизвестный item_id: {vk_id}")
 
+        # Сбор payload для FrontPad
         payload = {
             'request': 'add_order',
             'key': FRONTPAD_API_KEY,
@@ -51,8 +66,15 @@ def vk_callback():
         }
         payload.update(item_fields)
 
-        response = requests.post('https://app.frontpad.ru/api/index.php', data=payload)
-        print('FrontPad response:', response.text)
-        return 'ok'
+        # Отправка заказа в FrontPad
+        try:
+            response = requests.post('https://app.frontpad.ru/api/index.php', data=payload)
+            print("📦 Ответ от FrontPad:", response.text)
+            return 'ok'
+        except Exception as e:
+            print("🔥 Ошибка при отправке в FrontPad:", e)
+            return 'internal error', 500
 
+    # Если пришёл неизвестный тип события
+    print("❓ Неподдерживаемый тип события:", data.get('type'))
     return 'unsupported'
