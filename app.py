@@ -1,17 +1,3 @@
-from flask import Flask, request
-import requests
-import os
-import json
-
-app = Flask(__name__)
-
-CONFIRMATION_TOKEN = '38afba8f'
-FRONTPAD_API_KEY = os.getenv("FRONTPAD_API_KEY")
-VK_SECRET = os.getenv("VK_SECRET")
-
-if not FRONTPAD_API_KEY:
-    raise ValueError("FRONTPAD_API_KEY is not set")
-
 @app.route('/', methods=['POST'])
 def vk_callback():
     data = request.get_json()
@@ -29,19 +15,26 @@ def vk_callback():
         order = data['object']
         phone = order.get('phone', '79999999999')
         name = order.get('user_name', 'Клиент VK')
-        items = order['items']
+        items = order.get('items', [])
 
         mapped_items = {
-            '10001': '123',
+            '10001': '123',  # Убедись, что это ID из VK
             '10002': '124'
         }
 
         item_fields = {}
         for idx, item in enumerate(items):
-            fp_id = mapped_items.get(str(item['item_id']))
+            vk_id = str(item['item_id'])
+            fp_id = mapped_items.get(vk_id)
             if fp_id:
                 item_fields[f'items[{idx}][id]'] = fp_id
                 item_fields[f'items[{idx}][quantity]'] = item['quantity']
+            else:
+                print(f"⚠️ Не найден артикул во FrontPad для VK ID {vk_id}")
+
+        if not item_fields:
+            print("⛔ Ни один товар не сопоставлен — заказ не отправляется")
+            return 'no items', 400
 
         payload = {
             'request': 'add_order',
@@ -51,14 +44,24 @@ def vk_callback():
             'city': order.get('address', {}).get('city', ''),
             'street': order.get('address', {}).get('street', ''),
             'house': order.get('address', {}).get('house', ''),
-            'flat': order.get('address', {}).get('apartment', '')
+            'flat': order.get('address', {}).get('apartment', ''),
+            'delivery_type': 1,  # обязательно, даже если самовывоз
+            'source': 'VK',
+            'date': '2025-07-27',  # лучше ставить актуальную дату через datetime
+            'time': '23:55'
         }
         payload.update(item_fields)
 
-        print("📦 Отправляем в FrontPad:\n", payload)
+        print("📦 Отправляем в FrontPad:\n", json.dumps(payload, ensure_ascii=False, indent=2))
 
-        response = requests.post('https://app.frontpad.ru/api/index.php', data=payload)
-        print("🟢 Ответ от FrontPad:", response.text)
+        try:
+            response = requests.post('https://app.frontpad.ru/api/index.php', data=payload)
+            print(f"🟢 Статус ответа: {response.status_code}")
+            print("🟢 Тело ответа:", response.text)
+        except Exception as e:
+            print("⛔ Ошибка при отправке запроса:", e)
+            return 'error', 500
+
         return 'ok'
 
     print("⚠️ Тип события не поддерживается:", data['type'])
