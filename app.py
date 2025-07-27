@@ -5,51 +5,55 @@ import json
 
 app = Flask(__name__)
 
-# 🔐 Константы
-CONFIRMATION_TOKEN = 'f4256a8f'  # строка подтверждения сервера VK
-FRONTPAD_API_KEY = os.getenv("FRONTPAD_API_KEY")  # ключ API FrontPad
-VK_SECRET = os.getenv("VK_SECRET")  # секрет из VK Callback API
+# 🔐 Подтверждение сервера от VK
+CONFIRMATION_TOKEN = 'f4256a8f'
+
+# 🔑 Ключ и секрет для FrontPad
+FRONTPAD_API_KEY = os.getenv("FRONTPAD_API_KEY")
+FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
+
+# 🔐 Секрет для проверки входящих запросов от VK
+VK_SECRET = os.getenv("VK_SECRET")
 
 @app.route('/', methods=['POST'])
 def vk_callback():
     data = request.get_json()
     print("📥 Запрос от VK:\n", json.dumps(data, ensure_ascii=False, indent=2))
 
-    # 🔐 Проверка секрета
+    # Проверка секрета VK
     if 'secret' in data and data['secret'] != VK_SECRET:
-        print("⛔ Неверный секрет!")
+        print("⛔ Неверный секрет от VK!")
         return 'access denied', 403
 
-    # 🔄 Подтверждение сервера
-    if data.get('type') == 'confirmation':
+    # Подтверждение сервера VK
+    if data['type'] == 'confirmation':
         print("✅ Подтверждение сервера")
         return CONFIRMATION_TOKEN
 
-    # 📦 Новый заказ
-    if data.get('type') == 'market_order_new':
+    # Обработка нового заказа из VK Market
+    if data['type'] == 'market_order_new':
         order = data['object']
-        recipient = order.get('recipient', {})
+
+        phone = order.get('recipient', {}).get('phone', '79999999999')
+        name = order.get('recipient', {}).get('name', 'Клиент VK')
+        comment = order.get('comment', '')
         delivery = order.get('delivery', {})
         items = order.get('preview_order_items', [])
 
-        # Данные клиента
-        phone = recipient.get('phone', '').replace('+', '').replace(' ', '')
-        name = recipient.get('name', 'Клиент ВК')
-        comment = order.get('comment', '')
-
-        # Сбор товаров
+        # Формируем позиции для заказа
         item_fields = {}
         for idx, item in enumerate(items):
-            sku = item.get('item', {}).get('sku')
             quantity = item.get('quantity', 1)
+            sku = item.get('item', {}).get('sku')  # артикул = sku
             if sku:
                 item_fields[f'items[{idx}][id]'] = sku
                 item_fields[f'items[{idx}][quantity]'] = quantity
 
-        # Основной payload
+        # Формируем тело запроса
         payload = {
             'request': 'add_order',
             'key': FRONTPAD_API_KEY,
+            'secret': FRONTPAD_SECRET,  # 🔥 ОБЯЗАТЕЛЬНО!
             'phone': phone,
             'name': name,
             'comment': comment,
@@ -60,12 +64,9 @@ def vk_callback():
 
         print("📦 Отправляем в FrontPad:\n", payload)
 
-        try:
-            response = requests.post('https://app.frontpad.ru/api/index.php', data=payload, timeout=10)
-            print("✅ Ответ от FrontPad:", response.text)
-        except Exception as e:
-            print("❌ Ошибка при отправке в FrontPad:", str(e))
+        response = requests.post('https://app.frontpad.ru/api/index.php', data=payload)
+        print("✅ Ответ от FrontPad:", response.text)
         return 'ok'
 
-    print("⚠️ Необработанный тип:", data.get('type'))
+    print("⚠️ Необработанный тип:", data['type'])
     return 'unsupported'
