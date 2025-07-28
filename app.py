@@ -18,29 +18,27 @@ def vk_callback():
     if event.get("type") == "confirmation":
         return "3e2d3b00"
 
-    # Обработка заказа из корзины
+    # Обработка нового заказа
     if event.get("type") == "order_new":
-        obj = event.get("object", {})
         secret = event.get("secret")
-
-        # Проверка секрета
         if secret != VK_SECRET:
             return "access denied"
 
-        # Извлекаем нужные данные из заказа
-        order_id = obj.get("id")
-        user_id = obj.get("user_id")
-        items = obj.get("items", [])
-        delivery = obj.get("delivery")
+        order = event.get("object", {}).get("order", {})
+        delivery = event.get("object", {}).get("delivery", {})
 
-        # Адрес
-        street = delivery.get("address", {}).get("street", "")
-        home = delivery.get("address", {}).get("house", "")
-        apart = delivery.get("address", {}).get("apartment", "")
+        order_id = order.get("id")
+        user_id = order.get("user_id")
+        items = order.get("items", [])
+        comment = order.get("comment", "")
+
         phone = delivery.get("phone", "")
-        comment = obj.get("comment", "")
+        address = delivery.get("address", {})
+        street = address.get("street", "")
+        home = address.get("house", "")
+        apart = address.get("apartment", "")
 
-        # Подготовка данных для заказа во FrontPad
+        # Подготовка данных для FrontPad
         data = {
             "secret": FRONTPAD_SECRET,
             "name": f"VK заказ #{order_id}",
@@ -53,14 +51,15 @@ def vk_callback():
         }
 
         for i, item in enumerate(items):
-            data[f"product[{i}]"] = item["id"]      # артикул
-            data[f"product_kol[{i}]"] = item["quantity"]  # количество
+            data[f"product[{i}]"] = item.get("id")  # артикул
+            data[f"product_kol[{i}]"] = item.get("quantity", 1)  # количество
 
-        # Отправка запроса в FrontPad
-        response = requests.post("https://app.frontpad.ru/api/index.php?new_order", data=data)
-
-        res_json = response.json()
-        print(res_json)
+        # Отправка запроса
+        try:
+            response = requests.post("https://app.frontpad.ru/api/index.php?new_order", data=data)
+            print("FrontPad response:", response.text)
+        except Exception as e:
+            print("Ошибка при отправке заказа:", e)
 
         return "ok"
 
