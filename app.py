@@ -1,8 +1,13 @@
+
 import os
 from flask import Flask, request
 import requests
+import logging
 
 app = Flask(__name__)
+
+# Настройка логирования в файл
+logging.basicConfig(filename="app.log", level=logging.INFO)
 
 FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
 VK_GROUP_ID = os.getenv("VK_GROUP_ID")
@@ -13,15 +18,18 @@ VK_TOKEN = os.getenv("VK_TOKEN")
 @app.route("/", methods=["POST"])
 def vk_callback():
     event = request.get_json()
+    logging.info(f"Получен ивент: {event}")
 
     # Подтверждение сервера
     if event.get("type") == "confirmation":
+        logging.info("Отправка confirmation-кода")
         return "3e2d3b00"
 
     # Обработка нового заказа
     if event.get("type") == "order_new":
         secret = event.get("secret")
         if secret != VK_SECRET:
+            logging.warning(f"Секрет не совпал: {secret} != {VK_SECRET}")
             return "access denied"
 
         order = event.get("object", {}).get("order", {})
@@ -57,12 +65,13 @@ def vk_callback():
         # Отправка запроса
         try:
             response = requests.post("https://app.frontpad.ru/api/index.php?new_order", data=data)
-            print("FrontPad response:", response.text)
+            logging.info(f"Ответ от FrontPad: {response.text}")
         except Exception as e:
-            print("Ошибка при отправке заказа:", e)
+            logging.error(f"Ошибка при отправке заказа: {e}")
 
         return "ok"
 
+    logging.info("Необработанный тип события")
     return "ok"
 
 
