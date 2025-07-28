@@ -6,68 +6,66 @@ app = Flask(__name__)
 
 FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
 VK_GROUP_ID = os.getenv("VK_GROUP_ID")
-VK_SECRET = os.getenv("VK_SECRET")  # используется для проверки подписи
+VK_SECRET = os.getenv("VK_SECRET")
 VK_TOKEN = os.getenv("VK_TOKEN")
 
-# Обработка запросов от ВКонтакте
+
 @app.route("/", methods=["POST"])
 def vk_callback():
     event = request.get_json()
 
-    # 1. Подтверждение сервера
+    # Подтверждение сервера
     if event.get("type") == "confirmation":
-        return "3e2d3b00"  # Именно эту строку ждёт VK
+        return "3e2d3b00"
 
-    # 2. Обработка входящего нового сообщения
-    if event.get("type") == "message_new":
-        object_data = event.get("object", {})
+    # Обработка заказа из корзины
+    if event.get("type") == "order_new":
+        obj = event.get("object", {})
         secret = event.get("secret")
 
-        # Проверка секрета от ВК
+        # Проверка секрета
         if secret != VK_SECRET:
             return "access denied"
 
-        user_id = object_data["message"]["from_id"]
-        message_text = object_data["message"]["text"].strip().lower()
+        # Извлекаем нужные данные из заказа
+        order_id = obj.get("id")
+        user_id = obj.get("user_id")
+        items = obj.get("items", [])
+        delivery = obj.get("delivery")
 
-        # Проверка команды
-        if message_text == "аляска":
-            # Отправка заказа в FrontPad
-            response = requests.post(
-                "https://app.frontpad.ru/api/index.php?new_order",
-                data={
-                    "secret": FRONTPAD_SECRET,
-                    "product[0]": "123",        # Артикул ролла Аляска
-                    "product_kol[0]": "1",       # Кол-во 1
-                    "name": "Заказ из ВК",
-                    "descr": f"от пользователя VK {user_id}",
-                    "channel": "ВКонтакте"
-                }
-            )
-            res_json = response.json()
+        # Адрес
+        street = delivery.get("address", {}).get("street", "")
+        home = delivery.get("address", {}).get("house", "")
+        apart = delivery.get("address", {}).get("apartment", "")
+        phone = delivery.get("phone", "")
+        comment = obj.get("comment", "")
 
-            if res_json.get("result") == "success":
-                send_message(user_id, "Спасибо! Ваш заказ принят 🎉")
-            else:
-                send_message(user_id, "Произошла ошибка при оформлении заказа 😞")
+        # Подготовка данных для заказа во FrontPad
+        data = {
+            "secret": FRONTPAD_SECRET,
+            "name": f"VK заказ #{order_id}",
+            "descr": f"Комментарий: {comment}",
+            "phone": phone,
+            "street": street,
+            "home": home,
+            "apart": apart,
+            "channel": "ВКонтакте"
+        }
 
-        else:
-            send_message(user_id, "Чтобы сделать заказ, напишите: Аляска")
+        for i, item in enumerate(items):
+            data[f"product[{i}]"] = item["id"]      # артикул
+            data[f"product_kol[{i}]"] = item["quantity"]  # количество
+
+        # Отправка запроса в FrontPad
+        response = requests.post("https://app.frontpad.ru/api/index.php?new_order", data=data)
+
+        res_json = response.json()
+        print(res_json)
+
+        return "ok"
 
     return "ok"
 
-# Функция отправки сообщения пользователю
-def send_message(user_id, text):
-    requests.post(
-        "https://api.vk.com/method/messages.send",
-        params={
-            "user_id": user_id,
-            "random_id": 0,
-            "message": text,
-            "access_token": VK_TOKEN,
-            "v": "5.199"
-        }
-    )
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
