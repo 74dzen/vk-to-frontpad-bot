@@ -1,14 +1,14 @@
 from flask import Flask, request
 import requests
-import os
 import json
+import os
 
 app = Flask(__name__)
 
-# Подтверждение сервера ВКонтакте
+# Токен подтверждения от VK
 VK_CONFIRMATION_TOKEN = '3a6a509a'
 
-# Ключи от FrontPad
+# Доступы к FrontPad
 FRONTPAD_API_KEY = os.getenv("FRONTPAD_API_KEY")
 FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
 
@@ -16,11 +16,10 @@ FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
 def handle_vk_event():
     data = request.get_json()
     if not data:
-        print("🔴 Нет данных в запросе")
+        print("🔴 Нет данных от VK")
         return "no data"
 
     event_type = data.get("type")
-    print(f"📥 Получен event: {event_type}")
 
     if event_type == "confirmation":
         return VK_CONFIRMATION_TOKEN
@@ -32,12 +31,8 @@ def handle_vk_event():
             phone = recipient.get("phone", "")
             name = recipient.get("name", "")
             comment = order.get("comment", "")
-            address = order["delivery"].get("address", "")
-            order_items = order["preview_order_items"]
-
-            print(f"🛒 Заказ от {name} ({phone}), адрес: {address}")
-            print(f"📝 Комментарий: {comment}")
-            print(f"📦 Товары: {json.dumps(order_items, ensure_ascii=False)}")
+            address = order.get("delivery", {}).get("address", "")
+            order_items = order.get("preview_order_items", [])
 
             payload = {
                 "request": "add_order",
@@ -50,30 +45,22 @@ def handle_vk_event():
                 "source": "VK"
             }
 
-            added_products = 0
             for idx, item in enumerate(order_items):
                 sku = item.get("item", {}).get("sku")
                 quantity = item.get("quantity", 1)
-
                 if sku:
-                    payload[f"product[{added_products}]"] = sku
-                    payload[f"count[{added_products}]"] = quantity
-                    added_products += 1
-                else:
-                    print("⚠️ Пропущен товар без артикла:", item)
+                    payload[f"items[{idx}][id]"] = sku
+                    payload[f"items[{idx}][quantity]"] = quantity
 
-            print(f"📤 Отправка в FrontPad: {payload}")
+            print("📦 Отправка в FrontPad:", json.dumps(payload, indent=2, ensure_ascii=False))
             response = requests.post("https://app.frontpad.ru/api/index.php", data=payload)
             print("🟢 Ответ от FrontPad:", response.text)
             return "ok"
-
         except Exception as e:
-            print("🔴 Ошибка обработки заказа:", str(e))
+            print("🔴 Ошибка:", str(e))
             return "error"
 
-    else:
-        print("⚠️ Необработанный тип события:", event_type)
-
+    print("⚠️ Необработанный тип события:", event_type)
     return "unsupported"
 
 @app.route("/", methods=["GET"])
