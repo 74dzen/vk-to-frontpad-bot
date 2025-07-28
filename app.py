@@ -1,79 +1,74 @@
-
 import os
-from flask import Flask, request
+import json
 import requests
-import logging
+from flask import Flask, request
 
 app = Flask(__name__)
 
-# Настройка логирования в файл
-logging.basicConfig(filename="app.log", level=logging.INFO)
-
 FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
-VK_GROUP_ID = os.getenv("VK_GROUP_ID")
-VK_SECRET = os.getenv("VK_SECRET")
-VK_TOKEN = os.getenv("VK_TOKEN")
+FRONTPAD_URL = "https://app.frontpad.ru/api/index.php"
 
+VK_SECRET = os.getenv("VK_SECRET", "3223")  # на всякий случай
+TARGET_SKU = "123"
 
 @app.route("/", methods=["POST"])
-def vk_callback():
-    event = request.get_json()
-    logging.info(f"Получен ивент: {event}")
+def handle_vk_callback():
+    data = request.get_json()
+    print("🔔 Входящий webhook от VK:")
+    print(json.dumps(data, ensure_ascii=False, indent=2))
 
-    # Подтверждение сервера
-    if event.get("type") == "confirmation":
-        logging.info("Отправка confirmation-кода")
-        return "3e2d3b00"
+    # Проверка секрета
+    if data.get("secret") != VK_SECRET:
+        print("⛔ Неверный секрет.")
+        return "access denied", 403
+
+    # Ответ для подтверждения сервера
+    if data.get("type") == "confirmation":
+        return os.getenv("VK_CONFIRMATION", "no_confirmation_code")
 
     # Обработка нового заказа
-    if event.get("type") == "order_new":
-        secret = event.get("secret")
-        if secret != VK_SECRET:
-            logging.warning(f"Секрет не совпал: {secret} != {VK_SECRET}")
-            return "access denied"
+    if data.get("type") == "market_order_new":
+        order = data.get("object", {})
 
-        order = event.get("object", {}).get("order", {})
-        delivery = event.get("object", {}).get("delivery", {})
-
-        order_id = order.get("id")
-        user_id = order.get("user_id")
-        items = order.get("items", [])
+        recipient = order.get("recipient", {})
+        phone = recipient.get("phone", "")
+        name = recipient.get("name", "")
         comment = order.get("comment", "")
 
-        phone = delivery.get("phone", "")
-        address = delivery.get("address", {})
-        street = address.get("street", "")
-        home = address.get("house", "")
-        apart = address.get("apartment", "")
+        delivery_address = order.get("delivery", {}).get("address", "")
 
-        # Подготовка данных для FrontPad
-        data = {
+        items = order.get("preview_order_items", [])
+        order_items = []
+        for item in items:
+            sku = item.get("item", {}).get("sku", "")
+            if sku != TARGET_SKU:
+                print(f"⚠️ Пропущен товар с SKU: {sku}")
+                continue
+            quantity = item.get("quantity", 1)
+            order_items.append(f"{sku}:{quantity}")
+
+        if not order_items:
+            print("❌ Нет подходящих товаров для отправки во FrontPad.")
+            return "ok"
+
+        payload = {
             "secret": FRONTPAD_SECRET,
-            "name": f"VK заказ #{order_id}",
-            "descr": f"Комментарий: {comment}",
             "phone": phone,
-            "street": street,
-            "home": home,
-            "apart": apart,
-            "channel": "ВКонтакте"
+            "name": name,
+            "address": delivery_address,
+            "comment": comment,
+            "products": ";".join(order_items),
+            "client_time": str(order.get("date", "")),
+            "action": "new_order"
         }
 
-        for i, item in enumerate(items):
-            data[f"product[{i}]"] = item.get("id")  # артикул
-            data[f"product_kol[{i}]"] = item.get("quantity", 1)  # количество
+        print("📦 Отправка заказа во FrontPad:")
+        print(payload)
 
-        # Отправка запроса
         try:
-            response = requests.post("https://app.frontpad.ru/api/index.php?new_order", data=data)
-            logging.info(f"Ответ от FrontPad: {response.text}")
+            response = requests.post(FRONTPAD_URL, data=payload, timeout=10)
+            print("✅ Ответ от FrontPad:", response.text)
         except Exception as e:
-            logging.error(f"Ошибка при отправке заказа: {e}")
+            print("🔥 Ошибка при отправке запроса в FrontPad:", str(e))
 
-        return "ok"
-
-    logging.info("Необработанный тип события")
     return "ok"
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
