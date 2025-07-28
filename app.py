@@ -1,77 +1,69 @@
 from flask import Flask, request
 import requests
-import os
 import json
+import os
 
 app = Flask(__name__)
 
-# 🔐 Конфигурация из переменных окружения
-CONFIRMATION_TOKEN = os.getenv("VK_CONFIRMATION_TOKEN")  # f4256a8f
+# Токен подтверждения от VK (указан на вкладке Callback API)
+VK_CONFIRMATION_TOKEN = '3a6a509a'
+
+# Доступы к FrontPad
 FRONTPAD_API_KEY = os.getenv("FRONTPAD_API_KEY")
 FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
-VK_SECRET = os.getenv("VK_SECRET")
 
-@app.route('/', methods=['POST'])
-def vk_callback():
+@app.route("/", methods=["POST"])
+def handle_vk_event():
     data = request.get_json()
-    print("🟡 Входящий запрос от VK:\n", json.dumps(data, ensure_ascii=False, indent=2))
+    if not data:
+        return "no data"
 
-    # 🔐 Проверка секрета
-    if 'secret' in data and data['secret'] != VK_SECRET:
-        print("⛔ Неверный секрет!")
-        return 'access denied', 403
+    event_type = data.get("type")
 
-    # ✅ Подтверждение сервера
-    if data['type'] == 'confirmation':
-        print("✅ Подтверждение сервера")
-        return CONFIRMATION_TOKEN
+    if event_type == "confirmation":
+        return VK_CONFIRMATION_TOKEN
 
-    # 🛒 Новый заказ из VK Маркета
-    elif data['type'] == 'market_order_new':
-        order = data['object']
-        phone = order.get('recipient', {}).get('phone', '79999999999')
-        name = order.get('recipient', {}).get('name', 'Клиент VK')
-        items = order.get('preview_order_items', [])
-
-        if not items:
-            print("⚠️ В заказе нет товаров")
-            return 'no items', 400
-
-        # 🧾 Сбор товаров
-        item_fields = {}
-        for idx, item in enumerate(items):
-            sku = item.get('item', {}).get('sku')
-            quantity = item.get('quantity', 1)
-
-            if not sku:
-                print(f"⛔ Ошибка: у товара отсутствует sku (артикул). Полный item: {json.dumps(item, ensure_ascii=False)}")
-                return 'missing sku', 400
-
-            item_fields[f'items[{idx}][id]'] = sku
-            item_fields[f'items[{idx}][quantity]'] = quantity
-
-        # 📦 Формируем payload для FrontPad
-        payload = {
-            'request': 'add_order',
-            'key': FRONTPAD_API_KEY,
-            'secret': FRONTPAD_SECRET,
-            'phone': phone,
-            'name': name,
-            'source': 'VK'
-        }
-        payload.update(item_fields)
-
-        print("📤 Отправляем в FrontPad:\n", json.dumps(payload, indent=2, ensure_ascii=False))
-
-        # 📡 Запрос к FrontPad
+    elif event_type == "market_order_new":
         try:
-            response = requests.post('https://app.frontpad.ru/api/index.php', data=payload)
-            print("🟢 Ответ от FrontPad:", response.text)
-            return 'ok'
-        except Exception as e:
-            print("⛔ Ошибка при запросе в FrontPad:", e)
-            return 'frontpad error', 500
+            order = data["object"]
+            recipient = order["recipient"]
+            phone = recipient.get("phone", "")
+            name = recipient.get("name", "")
+            comment = order.get("comment", "")
+            address = order["delivery"].get("address", "")
+            order_items = order["preview_order_items"]
 
-    # 🚫 Необработанный тип события
-    print("⚠️ Необработанный тип:", data.get('type'))
-    return 'unsupported', 400
+            items = {}
+            for item in order_items:
+                sku = item.get("item", {}).get("sku")
+                quantity = item.get("quantity", 1)
+                if sku:
+                    items[sku] = quantity
+
+            payload = {
+                "request": "add_order",
+                "key": FRONTPAD_API_KEY,
+                "secret": FRONTPAD_SECRET,
+                "phone": phone,
+                "name": name,
+                "address": address,
+                "comment": comment,
+                "source": "VK"
+            }
+
+            for idx, (product_id, qty) in enumerate(items.items(), start=1):
+                payload[f"product[{idx}]"] = product_id
+                payload[f"product_kol[{idx}]"] = qty
+
+            response = requests.post("https://app.frontpad.ru/api/index.php", data=payload)
+            print("🟢 Ответ от FrontPad:", response.text)
+            return "ok"
+        except Exception as e:
+            print("🔴 Ошибка:", str(e))
+            return "error"
+
+    return "unsupported"
+
+@app.route("/", methods=["GET"])
+def index():
+    return "VK-Fronpad connector is working!"
