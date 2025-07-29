@@ -22,31 +22,36 @@ def vk_callback():
         return VK_CONFIRMATION
 
     if data.get("type") == "market_order_new":
-        order = data["object"]
+        order = data.get("object", {})
         items = order.get("items", [])
         delivery = order.get("delivery", {})
 
-        # Проверка: если delivery — строка, превращаем в пустой словарь
+        # Проверка: если delivery — не словарь, делаем пустой
         if not isinstance(delivery, dict):
             delivery = {}
 
         address = "Не указано"
+        address_data = delivery.get("address")
 
-        # Проверка: если address — словарь, собираем улицу и дом
-        if isinstance(delivery.get("address"), dict):
-            street = delivery["address"].get("street", "")
-            house = delivery["address"].get("house", "")
+        # Проверка типа адреса
+        if isinstance(address_data, dict):
+            street = address_data.get("street", "")
+            house = address_data.get("house", "")
             address = f"{street}, {house}".strip(", ")
-        elif isinstance(delivery.get("address"), str):
-            address = delivery["address"]
+        elif isinstance(address_data, str):
+            address = address_data
 
-        # Обработка самовывоза
+        # Самовывоз
         if order.get("delivery_type") == "pickup":
             address = "Самовывоз"
 
         name = order.get("customer_name", "")
         phone = order.get("customer_phone", "")
         comment = order.get("comment", "")
+
+        if not items:
+            print("⚠️ Пустой список товаров. Пропускаем заказ.")
+            return "ok"
 
         first_item = items[0]
         sku = first_item.get("sku")
