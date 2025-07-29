@@ -1,87 +1,86 @@
 import os
 import json
 import logging
-import requests
 from flask import Flask, request
+from dotenv import load_dotenv
+import requests
+
+load_dotenv()
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
-VK_CONFIRMATION = os.environ.get("VK_CONFIRMATION")
-VK_SECRET = os.environ.get("VK_SECRET")
-FRONTPAD_SECRET = os.environ.get("FRONTPAD_SECRET")
+VK_CONFIRMATION = os.getenv("VK_CONFIRMATION")
+FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
 
-# Таблица соответствия SKU и артикулов FrontPad
+# Таблица соответствий SKU → артикул (1:1 от 001 до 181)
 sku_to_article = {f"{i:03}": f"{i:03}" for i in range(1, 182)}
 
 @app.route("/", methods=["POST"])
 def vk_callback():
     data = request.get_json()
-    logging.info(f"📥 Получен запрос: {data}")
+    logging.info(f"📩 Получено событие: {json.dumps(data, ensure_ascii=False)}")
 
+    # Подтверждение сервера
     if data.get("type") == "confirmation":
+        logging.info("📡 Подтверждение сервера ВКонтакте")
         return VK_CONFIRMATION
 
-    if data.get("secret") != VK_SECRET:
-        logging.warning("⚠️ Неверный секретный ключ")
-        return "invalid secret"
-
+    # Обработка нового заказа
     if data.get("type") == "market_order_new":
-        order = data.get("object", {})
+        order = data["object"]
+        items = order.get("items", [])
+        user = order.get("user", {})
+        delivery = order.get("delivery", "")
+        address = ""
+        if isinstance(delivery, dict):
+            address = delivery.get("address", {}).get("street", "")
+        else:
+            address = ""
 
-        customer = order.get("customer", {})
-        delivery = order.get("delivery", {})
-        address_data = delivery.get("address", {}) if isinstance(delivery.get("address", {}), dict) else {}
+        name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+        phone = user.get("phone", "+79999999999")
         comment = order.get("comment", "")
 
-        name = customer.get("name", "")
-        phone = customer.get("phone", "")
-        city = address_data.get("city", "")
-        street = address_data.get("street", "")
-        house = address_data.get("house", "")
-        full_address = f"{city}, {street}, {house}".strip(", ")
+        # 🔍 Проверка содержимого заказа
+        logging.info(f"🛒 Состав заказа из VK: {items}")
 
-        items = order.get("items", [])
         products = []
-
         for item in items:
-            sku = str(item.get("sku", "")).strip()
+            sku = item.get("sku", "")
             quantity = item.get("quantity", 1)
             article = sku_to_article.get(sku)
+
             if article:
                 products.append({"article": article, "quantity": quantity})
             else:
                 logging.warning(f"⚠️ Не найден артикул для SKU: {sku}")
 
+        # ❌ Если список пуст — логируем и прекращаем
         if not products:
             logging.warning("⚠️ Пустой список товаров. Пропускаем заказ.")
-            return "no products"
+            return "ok"
 
         payload = {
             "secret": FRONTPAD_SECRET,
             "action": "new_order",
             "phone": phone,
             "name": name,
-            "delivery_address": full_address,
-            "comment": comment,
+            "delivery_address": address or "Челябинск",  # запасной вариант
+            "comment": comment or "Заказ из ВКонтакте",
             "products": json.dumps(products, ensure_ascii=False),
         }
 
         logging.info(f"📦 Отправляем заказ в FrontPad: {payload}")
-        response = requests.post("https://app.frontpad.ru/api/index.php", data=payload)
         try:
+            response = requests.post("https://app.frontpad.ru/api/index.php", data=payload)
             response_data = response.json()
+            logging.info(f"✅ Ответ от FrontPad: {response_data}")
+            if response_data.get("result") != "success":
+                logging.error(f"❌ Ошибка от FrontPad: {response_data.get('error')}")
         except Exception as e:
-            logging.error(f"❌ Ошибка при разборе ответа FrontPad: {e}")
-            response_data = None
-
-        logging.info(f"✅ Ответ от FrontPad: {response_data}")
-
-        if not response_data:
-            logging.error("❌ FrontPad не вернул ответ.")
-        elif response_data.get("result") != "success":
-            logging.error(f"❌ Ошибка от FrontPad: {response_data.get('error')}")
+            logging.error(f"🔥 Ошибка при запросе к FrontPad: {e}")
 
         return "ok"
 
-    return "unsupported"
+    return "ok"
