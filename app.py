@@ -8,11 +8,10 @@ FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
 VK_CONFIRMATION = os.getenv("VK_CONFIRMATION")
 VK_SECRET = os.getenv("VK_SECRET")
 
-# Таблица соответствий SKU ВКонтакте и артикулов FrontPad
+# Таблица соответствий SKU (ВКонтакте) — Артикулы (FrontPad)
 sku_to_article = {
     str(i).zfill(3): str(i).zfill(3) for i in range(1, 182)
 }
-
 
 @app.route("/", methods=["POST"])
 def vk_callback():
@@ -22,7 +21,7 @@ def vk_callback():
     if event.get("type") == "confirmation":
         return VK_CONFIRMATION
 
-    # Обработка нового заказа из корзины
+    # Обработка события создания заказа
     if event.get("type") == "market_order_new":
         obj = event.get("object", {})
         secret = event.get("secret")
@@ -35,13 +34,18 @@ def vk_callback():
         items = obj.get("items", [])
         delivery = obj.get("delivery", {})
 
-        street = delivery.get("address", {}).get("street", "")
-        home = delivery.get("address", {}).get("house", "")
-        apart = delivery.get("address", {}).get("apartment", "")
+        # --- Защита от ошибки: address может быть строкой
+        address_info = delivery.get("address", {})
+        if isinstance(address_info, str):
+            address_info = {}
+
+        street = address_info.get("street", "")
+        home = address_info.get("house", "")
+        apart = address_info.get("apartment", "")
         phone = delivery.get("phone", "")
         comment = obj.get("comment", "")
 
-        # Подготовка данных для запроса в FrontPad
+        # Формируем заказ для FrontPad
         data = {
             "secret": FRONTPAD_SECRET,
             "name": f"VK заказ #{order_id}",
@@ -58,20 +62,21 @@ def vk_callback():
             quantity = item["quantity"]
             article = sku_to_article.get(sku)
 
-            if article:
-                data[f"product[{i}]"] = article
-                data[f"product_kol[{i}]"] = quantity
-            else:
+            if not article:
                 print(f"❌ Неизвестный SKU: {sku}")
                 return "unknown product"
 
-        # Отправка заказа в FrontPad
+            data[f"product[{i}]"] = article
+            data[f"product_kol[{i}]"] = quantity
+
+        # Отправляем заказ в FrontPad
         response = requests.post("https://app.frontpad.ru/api/index.php?new_order", data=data)
+
         try:
-            res_json = response.json()
-            print(f"✅ Ответ от FrontPad: {res_json}")
+            res = response.json()
+            print(f"✅ Ответ от FrontPad: {res}")
         except Exception as e:
-            print(f"❌ Ошибка разбора ответа FrontPad: {e}")
+            print("❌ Ошибка при обработке ответа от FrontPad:", e)
             print(response.text)
 
         return "ok"
