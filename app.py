@@ -1,60 +1,83 @@
+import os
 from flask import Flask, request
 import requests
-import os
 
 app = Flask(__name__)
 
-FRONTPAD_SECRET = os.environ.get("FRONTPAD_SECRET")
-VK_CONFIRMATION = os.environ.get("VK_CONFIRMATION")
+FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
+VK_CONFIRMATION = os.getenv("VK_CONFIRMATION")
+VK_SECRET = os.getenv("VK_SECRET")
 
-# Таблица соответствий SKU (ВК) и артикулов (FrontPad)
-sku_to_article = {f"{i:03}": f"{i:03}" for i in range(1, 182)}  # 001–181
+# Таблица соответствий SKU ВКонтакте и артикулов FrontPad
+sku_to_article = {
+    str(i).zfill(3): str(i).zfill(3) for i in range(1, 182)
+}
 
-def create_order_in_frontpad(name, phone, sku):
-    article = sku_to_article.get(sku)
-    if not article:
-        return {"error": f"Артикул для SKU {sku} не найден."}
 
-    payload = {
-        "secret": FRONTPAD_SECRET,
-        "phone": phone,
-        "name": name,
-        "products": [
-            {
-                "article": article,
-                "quantity": 1
-            }
-        ]
-    }
+@app.route("/", methods=["POST"])
+def vk_callback():
+    event = request.get_json()
 
-    response = requests.post("https://app.frontpad.ru/api/index.php?new_order", json=payload)
-    try:
-        return response.json()
-    except Exception:
-        return {"error": "Некорректный ответ от FrontPad", "raw": response.text}
+    # Подтверждение сервера ВКонтакте
+    if event.get("type") == "confirmation":
+        return VK_CONFIRMATION
 
-@app.route('/', methods=['POST'])
-def vk_webhook():
-    data = request.get_json()
+    # Обработка нового заказа из корзины
+    if event.get("type") == "market_order_new":
+        obj = event.get("object", {})
+        secret = event.get("secret")
 
-    if data.get("type") == "confirmation":
-        return VK_CONFIRMATION, 200, {'Content-Type': 'text/plain'}
+        if secret != VK_SECRET:
+            return "access denied"
 
-    if data.get("type") == "market_order_new":
-        order = data["object"]
-        user_name = f"{order.get('first_name', '')} {order.get('last_name', '')}".strip()
-        phone = order.get("delivery_phone", "")
-        items = order.get("items", [])
+        order_id = obj.get("id")
+        user_id = obj.get("user_id")
+        items = obj.get("items", [])
+        delivery = obj.get("delivery", {})
 
-        results = []
-        for item in items:
-            sku = item.get("sku") or item.get("item_id") or ""
-            result = create_order_in_frontpad(user_name, phone, sku)
-            results.append({sku: result})
+        street = delivery.get("address", {}).get("street", "")
+        home = delivery.get("address", {}).get("house", "")
+        apart = delivery.get("address", {}).get("apartment", "")
+        phone = delivery.get("phone", "")
+        comment = obj.get("comment", "")
 
-        return {"status": "ok", "results": results}
+        # Подготовка данных для запроса в FrontPad
+        data = {
+            "secret": FRONTPAD_SECRET,
+            "name": f"VK заказ #{order_id}",
+            "descr": f"Комментарий: {comment}",
+            "phone": phone,
+            "street": street,
+            "home": home,
+            "apart": apart,
+            "channel": "ВКонтакте"
+        }
+
+        for i, item in enumerate(items):
+            sku = str(item["id"]).zfill(3)
+            quantity = item["quantity"]
+            article = sku_to_article.get(sku)
+
+            if article:
+                data[f"product[{i}]"] = article
+                data[f"product_kol[{i}]"] = quantity
+            else:
+                print(f"❌ Неизвестный SKU: {sku}")
+                return "unknown product"
+
+        # Отправка заказа в FrontPad
+        response = requests.post("https://app.frontpad.ru/api/index.php?new_order", data=data)
+        try:
+            res_json = response.json()
+            print(f"✅ Ответ от FrontPad: {res_json}")
+        except Exception as e:
+            print(f"❌ Ошибка разбора ответа FrontPad: {e}")
+            print(response.text)
+
+        return "ok"
 
     return "ok"
 
-if __name__ == '__main__':
-    app.run()
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
