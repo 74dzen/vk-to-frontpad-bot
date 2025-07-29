@@ -1,88 +1,74 @@
 import os
-from flask import Flask, request
+import json
 import requests
+from flask import Flask, request
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
 
-FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
 VK_CONFIRMATION = os.getenv("VK_CONFIRMATION")
-VK_SECRET = os.getenv("VK_SECRET")
+FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
+FRONTPAD_URL = "https://app.frontpad.ru/api/index.php"
 
-# Таблица соответствий SKU (ВКонтакте) — Артикулы (FrontPad)
-sku_to_article = {
-    str(i).zfill(3): str(i).zfill(3) for i in range(1, 182)
-}
+# Список допустимых артикулов (001–181)
+valid_skus = {f"{i:03d}" for i in range(1, 182)}
 
 @app.route("/", methods=["POST"])
 def vk_callback():
-    event = request.get_json()
+    data = request.json
 
-    # Подтверждение сервера ВКонтакте
-    if event.get("type") == "confirmation":
+    if data.get("type") == "confirmation":
         return VK_CONFIRMATION
 
-    # Обработка события создания заказа
-    if event.get("type") == "market_order_new":
-        obj = event.get("object", {})
-        secret = event.get("secret")
+    if data.get("type") == "market_order_new":
+        order = data["object"]
+        items = order.get("items", [])
+        delivery = order.get("delivery", {})
 
-        if secret != VK_SECRET:
-            return "access denied"
+        # Проверка: delivery может быть строкой (например, "pickup")
+        if isinstance(delivery, str):
+            delivery = {}
 
-        order_id = obj.get("id")
-        user_id = obj.get("user_id")
-        items = obj.get("items", [])
-        delivery = obj.get("delivery", {})
+        # Извлечение данных клиента
+        name = order.get("customer_name", "")
+        phone = order.get("customer_phone", "")
+        comment = order.get("comment", "")
 
-        # --- Защита от ошибки: address может быть строкой
-        address_info = delivery.get("address", {})
-        if isinstance(address_info, str):
-            address_info = {}
+        # Адрес
+        street = delivery.get("address", {}).get("street", "")
+        house = delivery.get("address", {}).get("house", "")
+        address = f"{street}, {house}".strip(", ")
 
-        street = address_info.get("street", "")
-        home = address_info.get("house", "")
-        apart = address_info.get("apartment", "")
-        phone = delivery.get("phone", "")
-        comment = obj.get("comment", "")
+        # Если самовывоз — добавим пометку
+        if order.get("delivery_type") == "pickup":
+            address = "Самовывоз"
 
-        # Формируем заказ для FrontPad
-        data = {
+        # Первый товар
+        first_item = items[0]
+        sku = first_item.get("sku")
+
+        # Проверка на допустимый SKU
+        if sku not in valid_skus:
+            print(f"❌ Неизвестный SKU: {sku}")
+            return "ok"
+
+        quantity = int(first_item.get("quantity", 1))
+
+        payload = {
             "secret": FRONTPAD_SECRET,
-            "name": f"VK заказ #{order_id}",
-            "descr": f"Комментарий: {comment}",
+            "action": "new_order",
             "phone": phone,
-            "street": street,
-            "home": home,
-            "apart": apart,
-            "channel": "ВКонтакте"
+            "name": name,
+            "comment": comment,
+            "delivery_address": address,
+            "products[0][id]": sku,
+            "products[0][quantity]": quantity
         }
 
-        for i, item in enumerate(items):
-            sku = str(item["id"]).zfill(3)
-            quantity = item["quantity"]
-            article = sku_to_article.get(sku)
-
-            if not article:
-                print(f"❌ Неизвестный SKU: {sku}")
-                return "unknown product"
-
-            data[f"product[{i}]"] = article
-            data[f"product_kol[{i}]"] = quantity
-
-        # Отправляем заказ в FrontPad
-        response = requests.post("https://app.frontpad.ru/api/index.php?new_order", data=data)
-
-        try:
-            res = response.json()
-            print(f"✅ Ответ от FrontPad: {res}")
-        except Exception as e:
-            print("❌ Ошибка при обработке ответа от FrontPad:", e)
-            print(response.text)
-
+        response = requests.post(FRONTPAD_URL, data=payload)
+        print("✅ Ответ от FrontPad:", response.text)
         return "ok"
 
     return "ok"
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
