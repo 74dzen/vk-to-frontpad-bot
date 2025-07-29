@@ -1,71 +1,103 @@
 import os
 from flask import Flask, request
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
 
-FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
-VK_SECRET = os.getenv("VK_SECRET")
-VK_CONFIRMATION = os.getenv("VK_CONFIRMATION")
+FRONTPAD_SECRET = os.getenv('FRONTPAD_SECRET')
+VK_SECRET = os.getenv('VK_SECRET')
+VK_CONFIRMATION = os.getenv('VK_CONFIRMATION')
 
-@app.route("/", methods=["POST"])
+# Таблица соответствия: SKU из ВКонтакте → артикул из FrontPad
+sku_to_article = {
+    '001': '001', '002': '002', '003': '003', '004': '004', '005': '005',
+    '006': '006', '007': '007', '008': '008', '009': '009', '010': '010',
+    '011': '011', '012': '012', '013': '013', '014': '014', '015': '015',
+    '016': '016', '017': '017', '018': '018', '019': '019', '020': '020',
+    '021': '021', '022': '022', '023': '023', '024': '024', '025': '025',
+    '026': '026', '027': '027', '028': '028', '029': '029', '030': '030',
+    '031': '031', '032': '032', '033': '033', '034': '034', '035': '035',
+    '036': '036', '037': '037', '038': '038', '039': '039', '040': '040',
+    '041': '041', '042': '042', '043': '043', '044': '044', '045': '045',
+    '046': '046', '047': '047', '048': '048', '049': '049', '050': '050',
+    '051': '051', '052': '052', '053': '053', '054': '054', '055': '055',
+    '056': '056', '057': '057', '058': '058', '059': '059', '060': '060',
+    '061': '061', '062': '062', '063': '063', '064': '064', '065': '065',
+    '066': '066', '067': '067', '068': '068', '069': '069', '070': '070',
+    '071': '071', '072': '072', '073': '073', '074': '074', '075': '075',
+    '076': '076', '077': '077', '078': '078', '079': '079', '080': '080',
+    '081': '081', '082': '082', '083': '083', '084': '084', '085': '085',
+    '086': '086', '087': '087', '088': '088', '089': '089', '090': '090',
+    '091': '091', '092': '092', '093': '093', '094': '094', '095': '095',
+    '096': '096', '097': '097', '098': '098', '099': '099', '100': '100',
+    '101': '101', '102': '102', '103': '103', '104': '104', '105': '105',
+    '106': '106', '107': '107', '108': '108', '109': '109', '110': '110',
+    '111': '111', '112': '112', '113': '113', '114': '114', '115': '115',
+    '116': '116', '117': '117', '118': '118', '119': '119', '120': '120',
+    '121': '121', '122': '122', '123': '123', '124': '124', '125': '125',
+    '126': '126', '127': '127', '128': '128', '129': '129', '130': '130',
+    '131': '131', '132': '132', '133': '133', '134': '134', '135': '135',
+    '136': '136', '137': '137', '138': '138', '139': '139', '140': '140',
+    '141': '141', '142': '142', '143': '143', '144': '144', '145': '145',
+    '146': '146', '147': '147', '148': '148', '149': '149', '150': '150',
+    '151': '151', '152': '152', '153': '153', '154': '154', '155': '155',
+    '156': '156', '157': '157', '158': '158', '159': '159', '160': '160',
+    '161': '161', '162': '162', '163': '163', '164': '164', '165': '165',
+    '166': '166', '167': '167', '168': '168', '169': '169', '170': '170',
+    '171': '171', '172': '172', '173': '173', '174': '174', '175': '175',
+    '176': '176', '177': '177', '178': '178', '179': '179', '180': '180',
+    '181': '181'
+}
+
+@app.route('/', methods=['POST'])
 def vk_callback():
-    event = request.get_json()
+    data = request.get_json()
+
+    # Проверка секрета
+    if 'secret' in data and data['secret'] != VK_SECRET:
+        return 'invalid secret'
 
     # Подтверждение сервера
-    if event.get("type") == "confirmation":
+    if data['type'] == 'confirmation':
         return VK_CONFIRMATION
 
     # Обработка нового заказа
-    if event.get("type") == "order_new":
-        secret = event.get("secret")
-        if secret != VK_SECRET:
-            return "access denied"
+    if data['type'] == 'order_new':
+        order = data['object']
+        user_name = order.get('user_name', 'Имя не указано')
+        phone = order.get('recipient', {}).get('phone', 'Телефон не указан')
+        comment = order.get('comment', '')
+        items = order.get('items', [])
 
-        obj = event.get("object", {})
-        order = obj.get("order", {})
-        delivery = obj.get("delivery", {})
+        frontpad_items = []
+        for item in items:
+            sku = str(item.get('sku')).zfill(3)
+            quantity = item.get('quantity', 1)
+            article = sku_to_article.get(sku)
 
-        order_id = order.get("id")
-        items = order.get("items", [])
-        comment = order.get("comment", "")
+            if article:
+                frontpad_items.append({'id': article, 'count': quantity})
+            else:
+                print(f'❌ Неизвестный SKU: {sku}')
 
-        phone = delivery.get("phone", "")
-        address = delivery.get("address", {})
-        street = address.get("street", "")
-        home = address.get("house", "")
-        apart = address.get("apartment", "")
+        if frontpad_items:
+            payload = {
+                'secret': FRONTPAD_SECRET,
+                'phone': phone,
+                'name': user_name,
+                'comment': comment,
+                'products': frontpad_items
+            }
 
-        # Подготовка данных для FrontPad
-        data = {
-            "secret": FRONTPAD_SECRET,
-            "name": f"VK заказ #{order_id}",
-            "descr": f"Комментарий: {comment}",
-            "phone": phone,
-            "street": street,
-            "home": home,
-            "apart": apart,
-            "channel": "ВКонтакте"
-        }
+            response = requests.post('https://app.frontpad.ru/api/index.php?new_order', json=payload)
+            print(f'✅ Товар: {frontpad_items}\nОтвет от FrontPad: {response.text}')
+        else:
+            print('❌ Нет подходящих товаров в заказе')
 
-        for i, item in enumerate(items):
-            sku = item.get("sku")
-            quantity = item.get("quantity", 1)
-            if not sku:
-                continue
-            data[f"product[{i}]"] = sku  # SKU совпадает с артикулом
-            data[f"product_kol[{i}]"] = quantity
+    return 'ok'
 
-        try:
-            response = requests.post("https://app.frontpad.ru/api/index.php?new_order", data=data)
-            print("➕ Товар:", ", ".join([f"{item.get('sku')} x{item.get('quantity', 1)}" for item in items]))
-            print("✅ Ответ от FrontPad:", response.text)
-        except Exception as e:
-            print("❌ Ошибка при отправке заказа:", e)
-
-        return "ok"
-
-    return "ok"
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+if __name__ == '__main__':
+    app.run(debug=True)
