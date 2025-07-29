@@ -1,71 +1,71 @@
 import os
-import json
 import logging
-import requests
-from flask import Flask, request
+from flask import Flask, request, jsonify
 from dotenv import load_dotenv
+import requests
 
 load_dotenv()
 
 app = Flask(__name__)
-
-VK_CONFIRMATION = os.getenv("VK_CONFIRMATION")
-FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
-
-# Прямая таблица соответствия SKU и артикулов (1:1)
-SKU_TO_ARTICLE = {f"{i:03}": f"{i:03}" for i in range(1, 182)}
-
 logging.basicConfig(level=logging.INFO)
 
-@app.route("/", methods=["POST"])
+FRONTPAD_SECRET = os.getenv('FRONTPAD_SECRET')
+VK_CONFIRMATION = os.getenv('VK_CONFIRMATION')
+
+# Таблица соответствия: SKU ВКонтакте = Артикул FrontPad (все от 001 до 181)
+sku_to_article = {f"{i:03}": f"{i:03}" for i in range(1, 182)}
+
+@app.route('/', methods=['POST'])
 def vk_callback():
     data = request.json
 
-    if data.get("type") == "confirmation":
+    # Подтверждение сервера
+    if data.get('type') == 'confirmation':
         return VK_CONFIRMATION
 
-    if data.get("type") == "market_order_new":
-        order = data.get("object", {})
-        items = order.get("preview_order_items", [])
-
-        if not items:
-            logging.warning("\u26a0\ufe0f Пустой список товаров. Пропускаем заказ.")
-            return "ok"
+    if data.get('type') == 'market_order_new':
+        order = data['object']
+        user_name = order['recipient']['name']
+        user_phone = order['recipient']['phone']
+        user_address = order['delivery']['address']
+        comment = order['comment']
 
         products = []
-        for item in items:
-            sku = item.get("item", {}).get("sku")
-            quantity = item.get("quantity", 1)
-            article = SKU_TO_ARTICLE.get(sku)
-
-            if article:
-                products.append({"article": article, "quantity": quantity})
+        for item in order.get('preview_order_items', []):
+            sku = item.get('item', {}).get('sku')
+            quantity = item.get('quantity', 1)
+            if sku in sku_to_article:
+                products.append({
+                    "article": sku_to_article[sku],
+                    "quantity": quantity
+                })
             else:
-                logging.warning(f"\u26a0\ufe0f Не найден артикул для SKU: {sku}")
+                logging.warning(f"❗ Неизвестный SKU: {sku}")
 
         if not products:
-            logging.warning("\u26a0\ufe0f Не удалось сопоставить ни один товар. Пропускаем заказ.")
+            logging.warning("⚠️ Пустой список товаров. Пропускаем заказ.")
             return "ok"
 
         payload = {
             "secret": FRONTPAD_SECRET,
             "action": "new_order",
-            "phone": order.get("recipient", {}).get("phone", ""),
-            "name": order.get("recipient", {}).get("name", ""),
-            "delivery_address": order.get("delivery", {}).get("address", ""),
-            "comment": order.get("comment", ""),
-            "products": products
+            "phone": user_phone,
+            "name": user_name,
+            "delivery_address": user_address,
+            "comment": comment,
+            "products": products  # Список словарей — не JSON-строка!
         }
 
-        logging.info("\ud83d\udce6 Отправляем заказ в FrontPad: %s", json.dumps(payload, ensure_ascii=False))
-
+        logging.info(f"📦 Отправляем заказ в FrontPad: {payload}")
+        response = requests.post("https://app.frontpad.ru/api/index.php", json=payload)
         try:
-            response = requests.post("https://app.frontpad.ru/api/index.php", json=payload)
-            logging.info("\u2705 Ответ от FrontPad: %s", response.text)
-        except Exception as e:
-            logging.exception("\u274c Ошибка при отправке запроса в FrontPad")
+            response_data = response.json()
+        except Exception:
+            logging.error(f"❌ FrontPad вернул некорректный JSON: {response.text}")
+            return "ok"
 
-        return "ok"
+        logging.info(f"✅ Ответ от FrontPad: {response_data}")
+        if response_data.get("result") != "success":
+            logging.error(f"❌ Ошибка от FrontPad: {response_data.get('error')}")
 
     return "ok"
-
