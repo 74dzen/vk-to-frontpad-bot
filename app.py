@@ -27,35 +27,34 @@ def vk_callback():
         items = order.get("items", [])
         delivery = order.get("delivery", {})
 
-        # Проверка: delivery может быть строкой (например, "pickup")
-        if isinstance(delivery, str):
+        # Защита от случая, когда delivery — это строка (например, "pickup")
+        if not isinstance(delivery, dict):
             delivery = {}
 
-        # Извлечение данных клиента
+        address_data = delivery.get("address", {})
+        street = address_data.get("street", "")
+        house = address_data.get("house", "")
+        address = f"{street}, {house}".strip(", ")
+
+        # Если тип доставки явно указан как самовывоз — помечаем
+        if order.get("delivery_type") == "pickup":
+            address = "Самовывоз"
+
         name = order.get("customer_name", "")
         phone = order.get("customer_phone", "")
         comment = order.get("comment", "")
 
-        # Адрес
-        street = delivery.get("address", {}).get("street", "")
-        house = delivery.get("address", {}).get("house", "")
-        address = f"{street}, {house}".strip(", ")
-
-        # Если самовывоз — добавим пометку
-        if order.get("delivery_type") == "pickup":
-            address = "Самовывоз"
-
-        # Первый товар
+        # Обработка первого товара
         first_item = items[0]
         sku = first_item.get("sku")
-
-        # Проверка на допустимый SKU
-        if sku not in valid_skus:
-            print(f"❌ Неизвестный SKU: {sku}")
-            return "ok"
-
         quantity = int(first_item.get("quantity", 1))
 
+        # Проверка на допустимый артикул
+        if sku not in valid_skus:
+            print(f"❌ Ошибка: неизвестный SKU {sku}")
+            return "ok"
+
+        # Отправка заказа в FrontPad
         payload = {
             "secret": FRONTPAD_SECRET,
             "action": "new_order",
@@ -72,3 +71,4 @@ def vk_callback():
         return "ok"
 
     return "ok"
+
