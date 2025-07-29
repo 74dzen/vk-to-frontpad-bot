@@ -38,7 +38,7 @@ def vk_webhook():
     data = request.get_json()
 
     if data.get("type") == "confirmation":
-        return VK_CONFIRMATION
+        return VK_CONFIRMATION, 200, {'Content-Type': 'text/plain'}
 
     if data.get("type") == "market_order_new":
         order = data["object"]
@@ -58,4 +58,3 @@ def vk_webhook():
 
 if __name__ == '__main__':
     app.run()
-
