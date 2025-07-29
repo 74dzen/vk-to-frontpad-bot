@@ -1,6 +1,6 @@
 import os
 import logging
-from flask import Flask, request, jsonify
+from flask import Flask, request
 from dotenv import load_dotenv
 import requests
 
@@ -12,14 +12,12 @@ logging.basicConfig(level=logging.INFO)
 FRONTPAD_SECRET = os.getenv('FRONTPAD_SECRET')
 VK_CONFIRMATION = os.getenv('VK_CONFIRMATION')
 
-# Таблица соответствия: SKU ВКонтакте = Артикул FrontPad (все от 001 до 181)
 sku_to_article = {f"{i:03}": f"{i:03}" for i in range(1, 182)}
 
 @app.route('/', methods=['POST'])
 def vk_callback():
     data = request.json
 
-    # Подтверждение сервера
     if data.get('type') == 'confirmation':
         return VK_CONFIRMATION
 
@@ -46,6 +44,8 @@ def vk_callback():
             logging.warning("⚠️ Пустой список товаров. Пропускаем заказ.")
             return "ok"
 
+        # Конвертируем список товаров в JSON-строку вручную
+        import json
         payload = {
             "secret": FRONTPAD_SECRET,
             "action": "new_order",
@@ -53,11 +53,12 @@ def vk_callback():
             "name": user_name,
             "delivery_address": user_address,
             "comment": comment,
-            "products": products  # Список словарей — не JSON-строка!
+            "products": json.dumps(products)
         }
 
         logging.info(f"📦 Отправляем заказ в FrontPad: {payload}")
-        response = requests.post("https://app.frontpad.ru/api/index.php", json=payload)
+        response = requests.post("https://app.frontpad.ru/api/index.php", data=payload)
+
         try:
             response_data = response.json()
         except Exception:
