@@ -1,20 +1,18 @@
 import os
 import json
 import logging
+import requests
 from flask import Flask, request
 from dotenv import load_dotenv
-import requests
 
 load_dotenv()
-
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# Константы из .env
 VK_CONFIRMATION = os.getenv("VK_CONFIRMATION")
 FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
 
-# Таблица соответствий SKU (VK) → артикул (FrontPad)
+# Таблица соответствий SKU → артикул (просто один в один от 001 до 181)
 sku_to_article = {f"{i:03}": f"{i:03}" for i in range(1, 182)}
 
 @app.route("/", methods=["POST"])
@@ -22,45 +20,39 @@ def vk_callback():
     data = request.get_json()
     logging.info(f"📩 Получены данные от VK: {json.dumps(data, ensure_ascii=False)}")
 
-    if "type" not in data:
-        return "no_type"
+    if not data or "type" not in data:
+        return "invalid"
 
     if data["type"] == "confirmation":
         return VK_CONFIRMATION
 
-    elif data["type"] == "market_order_new":
+    if data["type"] == "market_order_new":
         try:
-            order_data = data.get("object", {}).get("order", {})
-            if not order_data:
-                logging.warning("⚠️ Нет данных заказа в object.order.")
-                return "no_order"
-
-            # Извлекаем информацию о товарах
-            items = order_data.get("items", [])
+            order = data.get("object", {}).get("order", {})
+            items = order.get("items", [])
             if not items:
                 logging.warning("⚠️ Пустой список товаров. Пропускаем заказ.")
                 return "no_items"
 
-            # Преобразуем товары
+            # Правильное формирование списка товаров
             products = []
             for item in items:
-                sku = str(item.get("item", {}).get("sku", "")).zfill(3)
+                item_data = item.get("item", {})
+                sku = str(item_data.get("sku", "")).zfill(3)
                 article = sku_to_article.get(sku)
-                if not article:
-                    logging.warning(f"⚠️ Неизвестный SKU: {sku}. Пропускаем товар.")
-                    continue
-                quantity = item.get("quantity", 1)
-                products.append({
-                    "article": article,
-                    "quantity": quantity
-                })
+                if article:
+                    products.append({
+                        "article": article,
+                        "quantity": item.get("quantity", 1)
+                    })
+                else:
+                    logging.warning(f"⚠️ Неизвестный артикул (SKU): {sku}. Пропускаем.")
 
             if not products:
-                logging.warning("⚠️ Все товары были пропущены из-за отсутствия соответствий.")
+                logging.warning("⚠️ Все товары оказались без артикула. Пропускаем заказ.")
                 return "no_valid_products"
 
-            # Адрес
-            address_data = order_data.get("address", {})
+            address_data = order.get("address", {})
             address = ", ".join(filter(None, [
                 address_data.get("country"),
                 address_data.get("city"),
@@ -73,10 +65,10 @@ def vk_callback():
             payload = {
                 "secret": FRONTPAD_SECRET,
                 "action": "new_order",
-                "phone": order_data.get("phone", ""),
-                "name": order_data.get("display_user_name", ""),
+                "phone": order.get("phone", ""),
+                "name": order.get("display_user_name", ""),
                 "delivery_address": address,
-                "comment": order_data.get("comment", ""),
+                "comment": order.get("comment", ""),
                 "products": json.dumps(products, ensure_ascii=False)
             }
 
@@ -88,13 +80,13 @@ def vk_callback():
                 if response_data.get("result") != "success":
                     logging.error(f"❌ Ошибка от FrontPad: {response_data.get('error')}")
             except Exception as e:
-                logging.error(f"❌ Ошибка при разборе ответа от FrontPad: {e}")
-                logging.error(f"↩️ Ответ от сервера: {response.text}")
+                logging.error(f"❌ Ошибка разбора ответа от FrontPad: {e}")
+                logging.error(f"↩️ Ответ: {response.text}")
 
-        except Exception as e:
-            logging.exception("💥 Ошибка при обработке заказа.")
+        except Exception:
+            logging.exception("💥 Ошибка при обработке заказа")
 
     return "ok"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run()
