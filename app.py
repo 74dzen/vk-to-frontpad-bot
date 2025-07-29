@@ -5,65 +5,67 @@ import requests
 app = Flask(__name__)
 
 FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
-VK_GROUP_ID = os.getenv("VK_GROUP_ID")
 VK_SECRET = os.getenv("VK_SECRET")
-VK_TOKEN = os.getenv("VK_TOKEN")
 VK_CONFIRMATION = os.getenv("VK_CONFIRMATION")
-
 
 @app.route("/", methods=["POST"])
 def vk_callback():
     event = request.get_json()
-    print("VK Event:", event)
 
+    # Подтверждение сервера
     if event.get("type") == "confirmation":
-        print("VK confirmation requested")
         return VK_CONFIRMATION
 
-    if event.get("type") == "market_order_new":
+    # Обработка нового заказа
+    if event.get("type") == "order_new":
         secret = event.get("secret")
         if secret != VK_SECRET:
-            print("❌ Invalid secret:", secret)
             return "access denied"
 
         obj = event.get("object", {})
-        order_id = obj.get("id")
-        comment = obj.get("comment", "")
-        recipient = obj.get("recipient", {})
-        phone = recipient.get("phone", "")
-        name = recipient.get("name", "")
-        delivery_address = obj.get("delivery", {}).get("address", "")
+        order = obj.get("order", {})
+        delivery = obj.get("delivery", {})
 
-        # Товары
-        items = obj.get("preview_order_items", [])
+        order_id = order.get("id")
+        items = order.get("items", [])
+        comment = order.get("comment", "")
 
+        phone = delivery.get("phone", "")
+        address = delivery.get("address", {})
+        street = address.get("street", "")
+        home = address.get("house", "")
+        apart = address.get("apartment", "")
+
+        # Подготовка данных для FrontPad
         data = {
             "secret": FRONTPAD_SECRET,
-            "name": name,
+            "name": f"VK заказ #{order_id}",
+            "descr": f"Комментарий: {comment}",
             "phone": phone,
-            "street": delivery_address,
-            "descr": f"Комментарий: {comment}\nИсточник: ВК Маркет",
+            "street": street,
+            "home": home,
+            "apart": apart,
             "channel": "ВКонтакте"
         }
 
         for i, item in enumerate(items):
-            sku = item.get("item", {}).get("sku") or "123"
-            qty = item.get("quantity", 1)
-            data[f"product[{i}]"] = sku
-            data[f"product_kol[{i}]"] = qty
-            print(f"➕ Товар: {sku} x{qty}")
+            sku = item.get("sku")
+            quantity = item.get("quantity", 1)
+            if not sku:
+                continue
+            data[f"product[{i}]"] = sku  # SKU совпадает с артикулом
+            data[f"product_kol[{i}]"] = quantity
 
-        # Отправка заказа в FrontPad
         try:
             response = requests.post("https://app.frontpad.ru/api/index.php?new_order", data=data)
+            print("➕ Товар:", ", ".join([f"{item.get('sku')} x{item.get('quantity', 1)}" for item in items]))
             print("✅ Ответ от FrontPad:", response.text)
         except Exception as e:
-            print("❌ Ошибка при отправке в FrontPad:", e)
+            print("❌ Ошибка при отправке заказа:", e)
 
         return "ok"
 
     return "ok"
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
