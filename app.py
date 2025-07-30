@@ -23,7 +23,6 @@ def vk_callback():
     data = request.get_json(force=True)
     logging.info(f"📥 Весь JSON от ВК:\n{json.dumps(data, ensure_ascii=False, indent=2)}")
 
-
     # 🔑 Обработка подтверждения сервера
     if data.get("type") == "confirmation":
         return VK_CONFIRMATION
@@ -36,14 +35,14 @@ def vk_callback():
     # 🛒 Обработка нового заказа
     if data.get("type") == "market_order_new":
         order = data["object"]
-                customer = order.get("customer", {})
+        customer = order.get("customer", {})
         raw_items = order.get("items", {})
         items = list(raw_items.values()) if isinstance(raw_items, dict) else raw_items
 
         # ✅ Формируем список товаров для FrontPad
         products = []
         for item in items:
-            sku = item.get("sku")  # <-- ВАЖНО: sku — верхнего уровня, а не item["item"]["sku"]
+            sku = item.get("sku")
             quantity = item.get("quantity", 1)
             article = ARTICLES.get(sku)
             if article:
