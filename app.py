@@ -37,7 +37,8 @@ def vk_callback():
     if data.get("type") == "market_order_new":
         order = data["object"]
         customer = order.get("customer", {})
-        items = order.get("items", [])
+       raw_items = order.get("items", {})
+items = list(raw_items.values()) if isinstance(raw_items, dict) else raw_items
 
         # ✅ Формируем список товаров для FrontPad
         products = []
