@@ -23,7 +23,7 @@ def vk_callback():
     data = request.get_json(force=True)
     logging.info(f"📥 Весь JSON от ВК:\n{json.dumps(data, ensure_ascii=False, indent=2)}")
 
-    # 🔑 Обработка подтверждения сервера
+    # 🔑 Подтверждение сервера
     if data.get("type") == "confirmation":
         return VK_CONFIRMATION
 
@@ -35,15 +35,14 @@ def vk_callback():
     # 🛒 Обработка нового заказа
     if data.get("type") == "market_order_new":
         order = data["object"]
-        customer = order.get("customer", {})
-        items = order.get("preview_order_items", [])
-
-        logging.info(f"🧾 Товары в заказе ВКонтакте:\n{json.dumps(items, ensure_ascii=False, indent=2)}")
+        customer = order.get("recipient", {})
+        raw_items = order.get("preview_order_items", [])
+        logging.info(f"🧾 Товары в заказе ВКонтакте:\n{json.dumps(raw_items, ensure_ascii=False, indent=2)}")
 
         # ✅ Формируем список товаров для FrontPad
         products = []
-        for item in items:
-            sku = item.get("sku")
+        for item in raw_items:
+            sku = item.get("item", {}).get("sku")
             quantity = item.get("quantity", 1)
             article = ARTICLES.get(sku)
             if article:
@@ -56,9 +55,8 @@ def vk_callback():
             return "ok"
 
         # 🧾 Информация о клиенте
-        recipient = order.get("recipient", {})
-        phone = recipient.get("phone", "")
-        name = recipient.get("name", "").strip()
+        phone = customer.get("phone", "")
+        name = customer.get("name", "").strip()
         address = order.get("delivery", {}).get("address", "Город не указан")
         comment = order.get("comment", "")
 
@@ -91,5 +89,3 @@ def vk_callback():
         return "ok"
 
     return "ok"
-
-
