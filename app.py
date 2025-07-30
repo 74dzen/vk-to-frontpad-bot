@@ -1,8 +1,8 @@
 import os
 import json
 import logging
-import requests
 from flask import Flask, request
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -12,50 +12,54 @@ logging.basicConfig(level=logging.INFO)
 
 FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
 
-# Таблица соответствия SKU → артикулов
-sku_to_article = {f"{i:03}": f"{i:03}" for i in range(1, 182)}
+# Таблица соответствия SKU и артикулов (001–181)
+sku_to_article = {f"{i:03d}": f"{i:03d}" for i in range(1, 182)}
 
 @app.route("/", methods=["POST"])
 def vk_callback():
     data = request.get_json()
-    logging.info(f"📥 Получены данные от ВК: {data}")
+    logging.info(f"📥 Получен запрос: {json.dumps(data, ensure_ascii=False)}")
 
     if data.get("type") == "confirmation":
         return os.getenv("VK_CONFIRMATION_CODE", "")
 
     if data.get("type") != "market_order_new":
-        logging.info("🔕 Необрабатываемый тип события. Пропускаем.")
+        logging.info("⏭️ Событие не market_order_new, пропускаем")
         return "ok"
 
-    order = data["object"]
-    buyer = order.get("buyer", {})
-    delivery = order.get("delivery_address", {})
+    order = data.get("object", {})
+    logging.info(f"🧾 VK заказ полностью: {json.dumps(order, ensure_ascii=False)}")
 
-    # Контакты
-    phone = buyer.get("phone", "")
-    name = f"{buyer.get('first_name', '')} {buyer.get('last_name', '')}".strip()
+    name = order.get("display_name") or "Без имени"
+    phone = order.get("phone") or "+70000000000"
+    address_data = order.get("preview_address") or ""
+    comment = order.get("comment", "")
 
-    # Адрес
-    street = delivery.get("street", "")
-    city = delivery.get("city", "")
-    delivery_address = f"{city}, {street}".strip(", ")
+    # Формируем строку адреса
+    address_str = ""
+    if isinstance(address_data, dict):
+        address_str = ", ".join(filter(None, [
+            address_data.get("street"),
+            address_data.get("city"),
+            address_data.get("country")
+        ]))
+    elif isinstance(address_data, str):
+        address_str = address_data
 
-    # Комментарий
-    note = order.get("comment", "") or "Заказ из ВКонтакте"
-
-    # Товары
     items = order.get("items", [])
+    logging.info(f"📦 Товары в заказе: {items}")
+
     products = []
-
     for item in items:
-        sku = item.get("sku", "").strip()
+        raw_sku = item.get("sku") or item.get("id") or item.get("item_id")
+        sku = str(raw_sku).strip()
         quantity = int(item.get("quantity", 1))
-        article = sku_to_article.get(sku)
 
+        article = sku_to_article.get(sku)
         if article:
             products.append({"article": article, "quantity": quantity})
         else:
-            logging.warning(f"⚠️ Неизвестный SKU: {sku} — товар пропущен")
+            logging.warning(f"⚠️ Неизвестный SKU/ID: {sku} — товар пропущен")
 
     if not products:
         logging.warning("⚠️ Пустой список товаров. Пропускаем заказ.")
@@ -66,23 +70,26 @@ def vk_callback():
         "action": "new_order",
         "phone": phone,
         "name": name,
-        "delivery_address": delivery_address,
-        "comment": note,
-        "products": json.dumps(products, ensure_ascii=False),
+        "delivery_address": address_str,
+        "comment": comment,
+        "products": products  # JSON-массив, НЕ строка!
     }
 
     logging.info(f"📦 Отправляем заказ в FrontPad: {payload}")
+
     try:
-        response = requests.post("https://app.frontpad.ru/api/index.php", data=payload, timeout=10)
+        response = requests.post("https://app.frontpad.ru/api/index.php", json=payload)
         logging.info(f"✅ Ответ от FrontPad: {response.text}")
         response_data = response.json()
 
         if response_data.get("result") != "success":
             logging.error(f"❌ Ошибка от FrontPad: {response_data.get('error')}")
+        else:
+            logging.info("🎉 Заказ успешно создан в FrontPad")
     except Exception as e:
-        logging.exception(f"💥 Исключение при отправке заказа в FrontPad: {e}")
+        logging.exception(f"🔥 Ошибка при отправке заказа в FrontPad: {e}")
 
     return "ok"
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run()
