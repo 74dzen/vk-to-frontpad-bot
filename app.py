@@ -21,7 +21,8 @@ ARTICLES = {f"{i:03}": f"{i:03}" for i in range(1, 182)}  # от "001" до "181
 @app.route("/", methods=["POST"])
 def vk_callback():
     data = request.get_json(force=True)
-    logging.info(f"📥 Получено событие от ВК: {data}")
+    logging.info(f"📥 Весь JSON от ВК:\n{json.dumps(data, ensure_ascii=False, indent=2)}")
+
 
     # 🔑 Обработка подтверждения сервера
     if data.get("type") == "confirmation":
