@@ -14,6 +14,7 @@ FRONTPAD_API_URL = "https://app.frontpad.ru/api/index.php"
 FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
 CONFIRMATION_TOKEN = os.getenv("VK_CONFIRMATION")
 
+
 @app.route("/", methods=["POST"])
 def vk_callback():
     data = request.json
@@ -23,25 +24,18 @@ def vk_callback():
         return CONFIRMATION_TOKEN
 
     if data.get("type") == "market_order_new":
-        order = data["object"]
+        order = data.get("object", {})
 
         customer = order.get("customer", {})
-        first_name = customer.get("first_name", "")
-        last_name = customer.get("last_name", "")
+        full_name = f"{customer.get('first_name', '')} {customer.get('last_name', '')}".strip() or "Без имени"
         phone = customer.get("phone", "")
-        full_name = f"{first_name} {last_name}".strip() or "Без имени"
-
         address = order.get("delivery_address", "")
-        note = order.get("comment", "")
+        comment = order.get("comment", "")
 
         items = order.get("items", [])
-        if not items:
-            logging.warning("⚠️ Пустой список товаров. Пропускаем заказ.")
-            return "ok"
-
         products = []
         for item in items:
-            sku = item.get("sku", "").strip()
+            sku = item.get("sku")
             quantity = int(item.get("quantity", 1))
             if sku and sku.isdigit():
                 products.append({"article": sku, "quantity": quantity})
@@ -49,7 +43,7 @@ def vk_callback():
                 logging.warning(f"⚠️ Пропущен товар с невалидным SKU: {sku}")
 
         if not products:
-            logging.warning("⚠️ Не удалось собрать ни одного товара. Пропускаем заказ.")
+            logging.warning("⚠️ Пустой список товаров. Пропускаем заказ.")
             return "ok"
 
         payload = {
@@ -58,8 +52,8 @@ def vk_callback():
             "phone": phone,
             "name": full_name,
             "delivery_address": address,
-            "comment": note,
-            "products": json.dumps(products, ensure_ascii=False),  # ВАЖНО: JSON-строка!
+            "comment": comment,
+            "products": json.dumps(products, ensure_ascii=False),  # обязательно JSON-строка!
         }
 
         logging.info(f"📦 Отправляем заказ в FrontPad: {payload}")
@@ -69,25 +63,28 @@ def vk_callback():
             response.encoding = "utf-8"
             logging.info(f"✅ Ответ от FrontPad: {response.text}")
 
-            try:
-                response_data = response.json()
-            except Exception as e:
-                logging.error(f"❌ Ошибка разбора JSON: {e}")
-                return "ok"
-
-            if response_data.get("result") != "success":
-                logging.error(f"❌ Ошибка от FrontPad: {response_data.get('error')}")
+            if response.text:
+                try:
+                    response_data = response.json()
+                    if response_data.get("result") != "success":
+                        logging.error(f"❌ Ошибка от FrontPad: {response_data.get('error')}")
+                    else:
+                        logging.info("🎉 Заказ успешно создан!")
+                except Exception as e:
+                    logging.error(f"❌ Ошибка при разборе JSON-ответа: {e}")
             else:
-                logging.info("🎉 Заказ успешно создан!")
+                logging.error("❌ FrontPad вернул пустой ответ (null).")
 
         except Exception as e:
-            logging.exception("❌ Ошибка при отправке заказа в FrontPad:")
+            logging.exception("❌ Ошибка при запросе к FrontPad")
 
     return "ok"
 
+
 @app.route("/", methods=["GET"])
 def index():
-    return "👋 FrontPad VK интеграция активна."
+    return "👋 Сервер работает!"
+
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
