@@ -36,21 +36,14 @@ def vk_callback():
     if data.get("type") == "market_order_new":
         order = data["object"]
         customer = order.get("customer", {})
-        raw_items = order.get("items", {})
-        items = list(raw_items.values()) if isinstance(raw_items, dict) else raw_items
+        items = order.get("preview_order_items", [])
 
-        # 🔍 Логируем входящие товары
-        logging.info("🧾 Товары в заказе ВКонтакте:")
-        for item in items:
-            logging.info(f"🔹 SKU: {item.get('sku')} | Title: {item.get('title')} | Qty: {item.get('quantity')}")
+        logging.info(f"🧾 Товары в заказе ВКонтакте:\n{json.dumps(items, ensure_ascii=False, indent=2)}")
 
         # ✅ Формируем список товаров для FrontPad
         products = []
         for item in items:
             sku = item.get("sku")
-            if not sku:
-                continue
-            sku = str(sku).strip()
             quantity = item.get("quantity", 1)
             article = ARTICLES.get(sku)
             if article:
@@ -63,10 +56,10 @@ def vk_callback():
             return "ok"
 
         # 🧾 Информация о клиенте
-        phone = customer.get("phone", "")
-        name = f"{customer.get('first_name', '')} {customer.get('last_name', '')}".strip()
-        address_data = order.get("delivery_address", {})
-        address = address_data.get("city", "Город не указан")
+        recipient = order.get("recipient", {})
+        phone = recipient.get("phone", "")
+        name = recipient.get("name", "").strip()
+        address = order.get("delivery", {}).get("address", "Город не указан")
         comment = order.get("comment", "")
 
         # 📤 Подготовка запроса в FrontPad
@@ -98,4 +91,5 @@ def vk_callback():
         return "ok"
 
     return "ok"
+
 
