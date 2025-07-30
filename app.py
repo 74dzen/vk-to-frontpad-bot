@@ -10,12 +10,10 @@ load_dotenv()
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# 🔐 Секреты из .env
 VK_CONFIRMATION = os.getenv("VK_CONFIRMATION")
 VK_SECRET = os.getenv("VK_SECRET")
 FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
 
-# 📦 Таблица соответствия SKU (ВК) — Артикул (FrontPad)
 ARTICLES = {f"{i:03}": f"{i:03}" for i in range(1, 182)}  # от "001" до "181"
 
 @app.route("/", methods=["POST"])
@@ -23,26 +21,25 @@ def vk_callback():
     data = request.get_json(force=True)
     logging.info(f"📥 Весь JSON от ВК:\n{json.dumps(data, ensure_ascii=False, indent=2)}")
 
-    # 🔑 Подтверждение сервера
     if data.get("type") == "confirmation":
         return VK_CONFIRMATION
 
-    # 🔐 Проверка секрета
     if data.get("secret") != VK_SECRET:
         logging.warning("❌ Неверный секрет от ВК")
         return "not ok"
 
-    # 🛒 Обработка нового заказа
     if data.get("type") == "market_order_new":
-        order = data["object"]
+        order = data.get("object", {})
         customer = order.get("recipient", {})
-        raw_items = order.get("preview_order_items", [])
-        logging.info(f"🧾 Товары в заказе ВКонтакте:\n{json.dumps(raw_items, ensure_ascii=False, indent=2)}")
+        items = order.get("preview_order_items", [])
 
-        # ✅ Формируем список товаров для FrontPad
+        logging.info(f"🧾 Товары в заказе ВКонтакте:\n{json.dumps(items, ensure_ascii=False, indent=2)}")
+
         products = []
-        for item in raw_items:
-            sku = item.get("item", {}).get("sku")
+        for item in items:
+            sku = item.get("sku")
+            if not sku:
+                sku = item.get("item", {}).get("sku")
             quantity = item.get("quantity", 1)
             article = ARTICLES.get(sku)
             if article:
@@ -54,13 +51,11 @@ def vk_callback():
             logging.warning("⚠️ Пустой список товаров. Пропускаем заказ.")
             return "ok"
 
-        # 🧾 Информация о клиенте
         phone = customer.get("phone", "")
         name = customer.get("name", "").strip()
-        address = order.get("delivery", {}).get("address", "Город не указан")
+        address = order.get("delivery", {}).get("address", "Адрес не указан")
         comment = order.get("comment", "")
 
-        # 📤 Подготовка запроса в FrontPad
         payload = {
             "secret": FRONTPAD_SECRET,
             "action": "new_order",
@@ -82,7 +77,6 @@ def vk_callback():
                 logging.error("❌ Пустой ответ от FrontPad (null)")
             elif response_data.get("result") != "success":
                 logging.error(f"❌ Ошибка от FrontPad: {response_data.get('error')}")
-
         except Exception as e:
             logging.exception(f"❌ Ошибка при запросе в FrontPad: {e}")
 
