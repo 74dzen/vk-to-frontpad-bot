@@ -14,7 +14,8 @@ VK_CONFIRMATION = os.getenv("VK_CONFIRMATION")
 VK_SECRET = os.getenv("VK_SECRET")
 FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
 
-ARTICLES = {f"{i:03}": f"{i:03}" for i in range(1, 182)}  # от "001" до "181"
+# Таблица артикулов
+ARTICLES = {f"{i:03}": f"{i:03}" for i in range(1, 182)}  # от 001 до 181
 
 @app.route("/", methods=["POST"])
 def vk_callback():
@@ -30,16 +31,16 @@ def vk_callback():
 
     if data.get("type") == "market_order_new":
         order = data.get("object", {})
-        customer = order.get("recipient", {})
         items = order.get("preview_order_items", [])
+        recipient = order.get("recipient", {})
+        delivery = order.get("delivery", {})
 
-        logging.info(f"🧾 Товары в заказе ВКонтакте:\n{json.dumps(items, ensure_ascii=False, indent=2)}")
+        logging.info(f"🧾 Товары в заказе:\n{json.dumps(items, ensure_ascii=False, indent=2)}")
 
         products = []
         for item in items:
-            sku = item.get("sku")
-            if not sku:
-                sku = item.get("item", {}).get("sku")
+            item_info = item.get("item", {})
+            sku = item_info.get("sku") or item.get("sku")
             quantity = item.get("quantity", 1)
             article = ARTICLES.get(sku)
             if article:
@@ -51,9 +52,9 @@ def vk_callback():
             logging.warning("⚠️ Пустой список товаров. Пропускаем заказ.")
             return "ok"
 
-        phone = customer.get("phone", "")
-        name = customer.get("name", "").strip()
-        address = order.get("delivery", {}).get("address", "Адрес не указан")
+        name = recipient.get("name", "").strip()
+        phone = recipient.get("phone", "").strip()
+        address = delivery.get("address", "Адрес не указан")
         comment = order.get("comment", "")
 
         payload = {
@@ -78,7 +79,7 @@ def vk_callback():
             elif response_data.get("result") != "success":
                 logging.error(f"❌ Ошибка от FrontPad: {response_data.get('error')}")
         except Exception as e:
-            logging.exception(f"❌ Ошибка при запросе в FrontPad: {e}")
+            logging.exception(f"❌ Ошибка при отправке в FrontPad: {e}")
 
         return "ok"
 
