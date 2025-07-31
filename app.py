@@ -1,31 +1,42 @@
 import os
 import logging
 import json
-from flask import Flask, request
 import requests
+from flask import Flask, request
 from dotenv import load_dotenv
 
-# Загрузка переменных из .env
+# Загрузка переменных среды
 load_dotenv()
 
-# Настройка логгирования
+app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
-app = Flask(__name__)
-
-# Секретный ключ для FrontPad
+# Секреты
 FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
+VK_SECRET = os.getenv("VK_SECRET")
+VK_CONFIRMATION = os.getenv("VK_CONFIRMATION")
 
-# Сопоставление SKU <-> артикул (SKU = артикул)
-ARTICLE_MAP = {f"{i:03}": f"{i:03}" for i in range(1, 182)}
+# Таблица соответствия SKU → артикул (все от 001 до 181)
+ARTICLES = {f"{i:03}": f"{i:03}" for i in range(1, 182)}
 
 @app.route("/", methods=["POST"])
 def vk_callback():
     data = request.get_json(force=True)
-    logging.info(f"📥 Получен запрос от ВКонтакте:\n{json.dumps(data, ensure_ascii=False, indent=2)}")
+    logging.info(f"📥 Получен запрос от ВКонтакте:\n{json.dumps(data, indent=2, ensure_ascii=False)}")
 
-    if "type" in data and data["type"] == "market_order_new":
+    # Проверка подтверждения сервера
+    if data.get("type") == "confirmation":
+        return VK_CONFIRMATION
+
+    # Проверка секрета
+    if data.get("secret") != VK_SECRET:
+        logging.warning("❌ Неверный секрет от ВКонтакте!")
+        return "not ok"
+
+    # Обработка нового заказа
+    if data.get("type") == "market_order_new":
         order = data.get("object", {})
+
         recipient = order.get("recipient", {})
         delivery = order.get("delivery", {})
         items = order.get("preview_order_items", [])
@@ -42,12 +53,12 @@ def vk_callback():
             quantity = item.get("quantity", 1)
 
             if not sku:
-                logging.warning(f"❌ Не найден SKU у товара: {item}")
+                logging.warning(f"❌ SKU не найден в товаре: {item}")
                 continue
 
-            article = ARTICLE_MAP.get(sku)
+            article = ARTICLES.get(sku)
             if not article:
-                logging.warning(f"❌ SKU {sku} не найден в таблице артикулов!")
+                logging.warning(f"❌ SKU {sku} не найден в ARTICLES")
                 continue
 
             products.append({
@@ -59,7 +70,7 @@ def vk_callback():
             logging.warning("⚠️ Пустой список товаров. Пропускаем заказ.")
             return "ok"
 
-        # Подготовка запроса в FrontPad
+        # Формируем payload
         payload = {
             "secret": FRONTPAD_SECRET,
             "action": "new_order",
@@ -67,7 +78,7 @@ def vk_callback():
             "name": name,
             "delivery_address": address,
             "comment": comment,
-            "products": json.dumps(products, ensure_ascii=False)
+            "products": json.dumps(products)
         }
 
         logging.info(f"📦 Отправляем заказ в FrontPad: {payload}")
@@ -77,10 +88,10 @@ def vk_callback():
             logging.info(f"📤 Статус ответа от FrontPad: {response.status_code}")
             logging.info(f"📤 Тело ответа от FrontPad (text): {response.text}")
             try:
-                json_resp = response.json()
-                logging.info(f"✅ Ответ от FrontPad (json): {json_resp}")
+                json_data = response.json()
+                logging.info(f"✅ Ответ от FrontPad (json): {json_data}")
             except Exception:
-                logging.error("❌ Ошибка парсинга JSON-ответа от FrontPad")
+                logging.error("❌ Ошибка при разборе JSON-ответа от FrontPad")
         except Exception as e:
             logging.exception(f"🚨 Ошибка при отправке запроса в FrontPad: {e}")
 
