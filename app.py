@@ -72,7 +72,7 @@ def vk_callback():
         logging.info(f"📦 Отправляем заказ в FrontPad: {payload}")
 
         try:
-            response = requests.post("https://app.frontpad.ru/api/index.php", json=payload)
+           response = requests.post("https://app.frontpad.ru/api/index.php", data=payload)
             logging.info(f"📤 Статус ответа от FrontPad: {response.status_code}")
             logging.info(f"📤 Тело ответа от FrontPad (text): {response.text}")
             try:
