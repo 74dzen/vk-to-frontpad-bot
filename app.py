@@ -1,82 +1,80 @@
+import os
+import json
 import logging
 from flask import Flask, request
 import requests
-import json
 
 app = Flask(__name__)
 
+# Включаем логирование
 logging.basicConfig(level=logging.INFO)
 
-FRONTPAD_SECRET = 'ВАШ_СЕКРЕТ_ОТ_FRONTPAD'  # ← замени на свой
-VK_CONFIRMATION_TOKEN = 'ВАШ_ТОКЕН_ПОДТВЕРЖДЕНИЯ'  # ← замени на свой
+# Секретный ключ от FrontPad
+FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
 
-# Таблица артикулов: SKU = артикул (от 001 до 181)
-sku_to_article = {f'{i:03}': f'{i:03}' for i in range(1, 182)}
+# Таблица соответствия SKU -> артикул FrontPad
+SKU_TO_ARTICLE = {f"{i:03}": f"{i:03}" for i in range(1, 182)}  # SKU "001".."181" → артикул "001".."181"
 
-@app.route('/', methods=['POST'])
-def webhook():
-    data = request.get_json()
-    logging.info("📥 Получен JSON от ВК: %s", json.dumps(data, ensure_ascii=False, indent=2))
+@app.route("/", methods=["POST"])
+def handle_vk_order():
+    data = request.json
+    logging.info("📥 Получено событие от VK: %s", json.dumps(data, ensure_ascii=False))
 
-    if data.get('type') == 'confirmation':
-        return VK_CONFIRMATION_TOKEN
+    if data.get("type") != "market_order_new":
+        logging.info("ℹ️ Не событие market_order_new, пропускаем")
+        return "ok"
 
-    if data.get('type') == 'market_order_new':
-        order = data['object']
-        customer = order.get('recipient', {})
-        name = customer.get('name', '')
-        phone = customer.get('phone', '')
-        address = order.get('delivery', {}).get('address', '')
-        comment = order.get('comment', '')
+    order = data.get("object", {})
+    recipient = order.get("recipient", {})
+    delivery = order.get("delivery", {})
+    items = order.get("preview_order_items", [])
+    comment = order.get("comment", "")
 
-        items_raw = order.get('preview_order_items', [])
-        logging.info("🛒 Обработка %d товаров", len(items_raw))
+    # Парсинг продуктов
+    products = []
+    for item in items:
+        sku = item.get("item", {}).get("sku")
+        logging.info(f"🔎 Обнаружен SKU: {sku}")
+        if sku and sku in SKU_TO_ARTICLE:
+            article = SKU_TO_ARTICLE[sku]
+            quantity = item.get("quantity", 1)
+            products.append({
+                "article": article,
+                "quantity": quantity
+            })
+        else:
+            logging.warning(f"❌ SKU {sku} не найден в таблице артикулов!")
 
-        products = []
-        for item in items_raw:
-            try:
-                sku = item.get('item', {}).get('sku')
-                quantity = item.get('quantity', 1)
-                if sku:
-                    article = sku_to_article.get(sku)
-                    if article:
-                        products.append({"article": article, "quantity": quantity})
-                        logging.info(f"✅ Найден товар: SKU {sku} -> артикул {article}")
-                    else:
-                        logging.warning(f"❌ SKU {sku} не найден в таблице артикулов!")
-                else:
-                    logging.warning(f"❌ SKU отсутствует в товаре: {item}")
-            except Exception as e:
-                logging.error("Ошибка при обработке товара: %s", e)
+    if not products:
+        logging.warning("⚠️ Пустой список товаров. Пропускаем заказ.")
+        return "ok"
 
-        if not products:
-            logging.warning("⚠️ Пустой список товаров. Пропускаем заказ.")
-            return "ok"
+    payload = {
+        "secret": FRONTPAD_SECRET,
+        "action": "new_order",
+        "phone": recipient.get("phone", ""),
+        "name": recipient.get("name", ""),
+        "delivery_address": delivery.get("address", ""),
+        "comment": comment,
+        "products": json.dumps(products, ensure_ascii=False)
+    }
 
-        payload = {
-            "secret": FRONTPAD_SECRET,
-            "action": "new_order",
-            "phone": phone,
-            "name": name,
-            "delivery_address": address,
-            "comment": comment,
-            "products": json.dumps(products, ensure_ascii=False)
-        }
+    logging.info("📦 Отправляем заказ в FrontPad: %s", json.dumps(payload, ensure_ascii=False))
 
-        logging.info("📦 Отправляем заказ в FrontPad: %s", payload)
+    try:
         response = requests.post("https://app.frontpad.ru/api/index.php", data=payload)
-
         logging.info("📤 Статус ответа от FrontPad: %s", response.status_code)
         logging.info("📤 Тело ответа от FrontPad (text): %s", response.text)
         try:
-            response_json = response.json()
-            logging.info("✅ Ответ от FrontPad (json): %s", response_json)
-        except Exception as e:
-            logging.error("❌ Не удалось распарсить ответ как JSON: %s", e)
+            json_response = response.json()
+        except Exception:
+            json_response = None
+        logging.info("✅ Ответ от FrontPad (json): %s", json_response)
+    except Exception as e:
+        logging.error("🔥 Ошибка при отправке заказа в FrontPad: %s", str(e))
 
     return "ok"
 
-@app.route('/', methods=['GET'])
-def index():
-    return "👋 Бот работает."
-
+@app.route("/", methods=["GET"])
+def health():
+    return "Server is running", 200
