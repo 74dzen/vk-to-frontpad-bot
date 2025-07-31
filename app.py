@@ -15,8 +15,8 @@ VK_CONFIRMATION = os.getenv("VK_CONFIRMATION")
 VK_SECRET = os.getenv("VK_SECRET")
 FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
 
-# Таблица артикулов
-ARTICLES = {f"{i:03}": f"{i:03}" for i in range(1, 182)}  # "001"–"181"
+# Таблица артикулов: "001"–"181"
+ARTICLES = {f"{i:03}": f"{i:03}" for i in range(1, 182)}
 
 @app.route("/", methods=["POST"])
 def vk_callback():
@@ -36,12 +36,12 @@ def vk_callback():
     if data.get("type") == "market_order_new":
         order = data.get("object", {})
         customer = order.get("customer", {})
-       raw_items = order.get("preview_order_items") or order.get("items") or {}
-logging.info(f"🧾 raw_items:\n{json.dumps(raw_items, ensure_ascii=False, indent=2)}")
+        raw_items = order.get("preview_order_items") or order.get("items") or {}
+        logging.info(f"🧾 raw_items:\n{json.dumps(raw_items, ensure_ascii=False, indent=2)}")
         items = list(raw_items.values()) if isinstance(raw_items, dict) else raw_items
 
         if not items:
-            logging.warning("⚠️ Нет товаров в preview_order_items")
+            logging.warning("⚠️ Нет товаров в заказе")
             return "ok"
 
         product_data = {}
