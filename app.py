@@ -4,8 +4,9 @@ import json
 import requests
 from flask import Flask, request
 from dotenv import load_dotenv
+from urllib.parse import urlencode
 
-# Загрузка переменных из .env
+# Загрузка переменных
 load_dotenv()
 
 app = Flask(__name__)
@@ -15,7 +16,6 @@ FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
 VK_SECRET = os.getenv("VK_SECRET")
 VK_CONFIRMATION = os.getenv("VK_CONFIRMATION")
 
-# Все 181 товара с артикулом = SKU
 ARTICLE_MAP = {f"{i:03}": f"{i:03}" for i in range(1, 182)}
 
 @app.route("/", methods=["POST"])
@@ -65,8 +65,9 @@ def vk_callback():
             logging.warning("⚠️ Пустой список товаров. Пропускаем заказ.")
             return "ok"
 
-        # Готовим строку с JSON товаров
-        products_json = json.dumps(products_list, ensure_ascii=False)
+        # ВАЖНО: JSON-строка с экранированием кавычек
+        products_str = json.dumps(products_list, ensure_ascii=False)
+        escaped_products = products_str.replace('"', '\\"')
 
         payload = {
             "secret": FRONTPAD_SECRET,
@@ -75,20 +76,21 @@ def vk_callback():
             "name": name,
             "delivery_address": address,
             "comment": comment,
-            "products": products_json  # Важно: строка!
+            "products": f'"{escaped_products}"'  # двойное экранирование
         }
 
         logging.info(f"📦 Отправляем заказ в FrontPad: {payload}")
 
         try:
-            response = requests.post("https://app.frontpad.ru/api/index.php", data=payload)
+            headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+            response = requests.post("https://app.frontpad.ru/api/index.php", data=urlencode(payload), headers=headers)
             logging.info(f"📤 Статус ответа от FrontPad: {response.status_code}")
             logging.info(f"📤 Тело ответа от FrontPad (text): {response.text}")
             try:
                 json_data = response.json()
                 logging.info(f"✅ Ответ от FrontPad (json): {json_data}")
             except Exception:
-                logging.error("❌ Ошибка при разборе JSON-ответа от FrontPad")
+                logging.warning("ℹ️ Ответ не JSON")
         except Exception as e:
             logging.exception(f"🚨 Ошибка при отправке запроса в FrontPad: {e}")
 
