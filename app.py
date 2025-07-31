@@ -1,5 +1,6 @@
 import os
 import logging
+import json
 from flask import Flask, request
 import requests
 from dotenv import load_dotenv
@@ -20,11 +21,11 @@ ARTICLE_MAP = {f"{i:03}": f"{i:03}" for i in range(1, 182)}
 
 @app.route("/", methods=["POST"])
 def vk_callback():
-    data = request.get_json()
-    logging.info(f"📥 Получен запрос от ВКонтакте: {data}")
+    data = request.get_json(force=True)
+    logging.info(f"📥 Получен запрос от ВКонтакте:\n{json.dumps(data, ensure_ascii=False, indent=2)}")
 
     if "type" in data and data["type"] == "market_order_new":
-        order = data["object"]
+        order = data.get("object", {})
         recipient = order.get("recipient", {})
         delivery = order.get("delivery", {})
         items = order.get("preview_order_items", [])
@@ -66,13 +67,13 @@ def vk_callback():
             "name": name,
             "delivery_address": address,
             "comment": comment,
-            "products": products
+            "products": json.dumps(products, ensure_ascii=False)
         }
 
         logging.info(f"📦 Отправляем заказ в FrontPad: {payload}")
 
         try:
-           response = requests.post("https://app.frontpad.ru/api/index.php", data=payload)
+            response = requests.post("https://app.frontpad.ru/api/index.php", data=payload)
             logging.info(f"📤 Статус ответа от FrontPad: {response.status_code}")
             logging.info(f"📤 Тело ответа от FrontPad (text): {response.text}")
             try:
