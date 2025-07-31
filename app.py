@@ -5,35 +5,31 @@ import requests
 from flask import Flask, request
 from dotenv import load_dotenv
 
-# Загрузка переменных среды
+# Загрузка переменных из .env
 load_dotenv()
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# Секреты
 FRONTPAD_SECRET = os.getenv("FRONTPAD_SECRET")
 VK_SECRET = os.getenv("VK_SECRET")
 VK_CONFIRMATION = os.getenv("VK_CONFIRMATION")
 
-# Таблица соответствия SKU → артикул (все от 001 до 181)
-ARTICLES = {f"{i:03}": f"{i:03}" for i in range(1, 182)}
+# Все 181 товара с артикулом = SKU
+ARTICLE_MAP = {f"{i:03}": f"{i:03}" for i in range(1, 182)}
 
 @app.route("/", methods=["POST"])
 def vk_callback():
     data = request.get_json(force=True)
-    logging.info(f"📥 Получен запрос от ВКонтакте:\n{json.dumps(data, indent=2, ensure_ascii=False)}")
+    logging.info(f"📥 Получен запрос от VK:\n{json.dumps(data, indent=2, ensure_ascii=False)}")
 
-    # Проверка подтверждения сервера
     if data.get("type") == "confirmation":
         return VK_CONFIRMATION
 
-    # Проверка секрета
     if data.get("secret") != VK_SECRET:
-        logging.warning("❌ Неверный секрет от ВКонтакте!")
+        logging.warning("❌ Секрет от VK не совпадает!")
         return "not ok"
 
-    # Обработка нового заказа
     if data.get("type") == "market_order_new":
         order = data.get("object", {})
 
@@ -46,31 +42,32 @@ def vk_callback():
         address = delivery.get("address", "")
         comment = order.get("comment", "")
 
-        # Сбор товаров
-        products = []
+        products_list = []
         for item in items:
             sku = item.get("item", {}).get("sku")
             quantity = item.get("quantity", 1)
 
             if not sku:
-                logging.warning(f"❌ SKU не найден в товаре: {item}")
+                logging.warning(f"❌ Не найден SKU у товара: {item}")
                 continue
 
-            article = ARTICLES.get(sku)
+            article = ARTICLE_MAP.get(sku)
             if not article:
-                logging.warning(f"❌ SKU {sku} не найден в ARTICLES")
+                logging.warning(f"❌ SKU {sku} не найден в таблице артикулов!")
                 continue
 
-            products.append({
+            products_list.append({
                 "article": article,
                 "quantity": quantity
             })
 
-        if not products:
+        if not products_list:
             logging.warning("⚠️ Пустой список товаров. Пропускаем заказ.")
             return "ok"
 
-        # Формируем payload
+        # Готовим строку с JSON товаров
+        products_json = json.dumps(products_list, ensure_ascii=False)
+
         payload = {
             "secret": FRONTPAD_SECRET,
             "action": "new_order",
@@ -78,7 +75,7 @@ def vk_callback():
             "name": name,
             "delivery_address": address,
             "comment": comment,
-            "products": json.dumps(products)
+            "products": products_json  # Важно: строка!
         }
 
         logging.info(f"📦 Отправляем заказ в FrontPad: {payload}")
