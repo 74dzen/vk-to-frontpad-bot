@@ -36,7 +36,8 @@ def vk_callback():
     if data.get("type") == "market_order_new":
         order = data.get("object", {})
         customer = order.get("customer", {})
-        raw_items = order.get("preview_order_items", {})
+       raw_items = order.get("preview_order_items") or order.get("items") or {}
+logging.info(f"🧾 raw_items:\n{json.dumps(raw_items, ensure_ascii=False, indent=2)}")
         items = list(raw_items.values()) if isinstance(raw_items, dict) else raw_items
 
         if not items:
