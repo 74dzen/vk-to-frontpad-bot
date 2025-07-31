@@ -58,14 +58,15 @@ def vk_callback():
         comment = order.get("comment", "")
 
         payload = {
-            "secret": FRONTPAD_SECRET,
-            "action": "new_order",
-            "phone": phone,
-            "name": name,
-            "delivery_address": address,
-            "comment": comment,
-            "products": json.dumps(products, ensure_ascii=False)
-        }
+    "secret": FRONTPAD_SECRET,
+    "action": "new_order",
+    "phone": phone,
+    "name": name,
+    "delivery_address": address,
+    "comment": comment,
+    "products": products  # 👈 без сериализации
+}
+
 
         logging.info(f"📦 Отправляем заказ в FrontPad: {payload}")
 
