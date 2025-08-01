@@ -53,9 +53,12 @@ def vk_callback():
         logging.info("📦 Отправляем заказ в FrontPad: %s", payload)
 
         try:
-            response = requests.post("https://app.frontpad.ru/api/index.php?new_order", data=payload)
-            logging.info("📤 Статус ответа от FrontPad: %s", response.status_code)
-            logging.info("📤 Тело ответа от FrontPad (text): %s", response.text)
+    for key, value in payload.items():
+        logging.info(f"📤 {key}: {value}")
+    
+    response = requests.post("https://app.frontpad.ru/api/index.php?new_order", data=payload)
+    logging.info("📤 Статус ответа от FrontPad: %s", response.status_code)
+    logging.info("📤 Тело ответа от FrontPad (text): %s", response.text)
 
             if response.status_code == 200 and response.text != "null":
                 logging.info("✅ Заказ успешно создан во FrontPad.")
