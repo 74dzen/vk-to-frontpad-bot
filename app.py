@@ -40,15 +40,23 @@ def vk_callback():
             "comment": comment
         }
 
+        logging.info(f"📋 Список товаров (preview_order_items): {items}")
+
         for i, item in enumerate(items):
-            sku = str(item.get("item", {}).get("sku", "")).strip()
-            qty = int(item.get("quantity", 1))
+            raw_sku = item.get("item", {}).get("sku")
+            sku = str(raw_sku).strip() if raw_sku is not None else ""
+            try:
+                qty = int(item.get("quantity", 1))
+            except (ValueError, TypeError):
+                qty = 1
+
             if sku and qty > 0:
                 payload[f"product[{i}]"] = sku
                 payload[f"product_kol[{i}]"] = qty
-                logging.info(f"➕ Товар: {sku} x{qty}")
+                logging.info(f"📤 product[{i}]: {sku}")
+                logging.info(f"📤 product_kol[{i}]: {qty}")
             else:
-                logging.warning(f"⚠️ Пропущен товар: {item}")
+                logging.warning(f"⚠️ Пропущен товар: sku={sku}, qty={qty}, raw={item}")
 
         logging.info("📦 Отправляем заказ в FrontPad...")
 
