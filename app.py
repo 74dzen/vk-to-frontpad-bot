@@ -24,8 +24,12 @@ def vk_callback():
         delivery = order.get("delivery", {})
         comment = order.get("comment", "")
 
-        # Получаем список товаров: сначала items, если его нет — preview_order_items
-        items = order.get("items") or order.get("preview_order_items", [])
+        # Получаем список товаров: сначала items, если он пустой — используем preview_order_items
+        items = order.get("items")
+        if not items:
+            items = order.get("preview_order_items", [])
+
+        logging.info(f"🔢 Кол-во товаров в заказе: {len(items)}")
 
         phone = recipient.get("phone", "").strip()
         name = recipient.get("name", "").strip()
@@ -44,7 +48,7 @@ def vk_callback():
         }
 
         for i, item in enumerate(items):
-            item_data = item.get("item", {}) if "item" in item else item  # для preview_order_items и items
+            item_data = item.get("item", {}) if "item" in item else item
             sku = str(item_data.get("sku", "")).strip()
             qty = int(item.get("quantity", 1))
 
