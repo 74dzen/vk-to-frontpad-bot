@@ -22,7 +22,10 @@ def vk_callback():
         recipient = order.get("recipient", {})
         delivery = order.get("delivery", {})
         comment = order.get("comment", "")
-        items = order.get("preview_order_items", [])
+        
+        # Пытаемся взять полный список товаров, если он есть
+        items = order.get("items", []) or order.get("preview_order_items", [])
+        logging.info("📦 Всего товаров в заказе: %d", len(items))
 
         phone = recipient.get("phone", "").strip()
         name = recipient.get("name", "").strip()
@@ -44,7 +47,7 @@ def vk_callback():
             sku = str(item.get("item", {}).get("sku", "")).strip()
             qty = int(item.get("quantity", 1))
 
-            logging.info(f"🕵️ Проверка товара #{i}: sku={sku}, qty={qty}")  # 🔍 Добавлено
+            logging.info(f"🕵️ Проверка товара #{i}: sku={sku}, qty={qty}")
 
             if sku and qty > 0:
                 payload[f"product[{i}]"] = sku
