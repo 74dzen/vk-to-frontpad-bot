@@ -17,16 +17,15 @@ def vk_callback():
     data = request.get_json()
     logging.info("📥 Получен запрос от ВКонтакте: %s", data)
 
-    if data.get("type") == "market_order_new" and data.get("secret") == VK_SECRET:
+    # Обрабатываем оба типа событий
+    if data.get("type") in ["market_order_new", "market_order_edit"] and data.get("secret") == VK_SECRET:
         order = data.get("object", {})
         recipient = order.get("recipient", {})
         delivery = order.get("delivery", {})
         comment = order.get("comment", "")
-        
-        # ⚠️ Используем ПОЛНЫЙ список товаров, а не preview
-        items = order.get("items", [])
-        logging.info(f"🧾 Все товары в заказе (items): {items}")
-        logging.info(f"📦 Кол-во товаров: {len(items)}")
+
+        # Получаем список товаров: сначала items, если его нет — preview_order_items
+        items = order.get("items") or order.get("preview_order_items", [])
 
         phone = recipient.get("phone", "").strip()
         name = recipient.get("name", "").strip()
@@ -45,7 +44,8 @@ def vk_callback():
         }
 
         for i, item in enumerate(items):
-            sku = str(item.get("item", {}).get("sku", "")).strip()
+            item_data = item.get("item", {}) if "item" in item else item  # для preview_order_items и items
+            sku = str(item_data.get("sku", "")).strip()
             qty = int(item.get("quantity", 1))
 
             logging.info(f"🕵️ Проверка товара #{i}: sku={sku}, qty={qty}")
