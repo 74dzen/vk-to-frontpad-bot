@@ -23,9 +23,10 @@ def vk_callback():
         delivery = order.get("delivery", {})
         comment = order.get("comment", "")
         
-        # Пытаемся взять полный список товаров, если он есть
-        items = order.get("items", []) or order.get("preview_order_items", [])
-        logging.info("📦 Всего товаров в заказе: %d", len(items))
+        # ⚠️ Используем ПОЛНЫЙ список товаров, а не preview
+        items = order.get("items", [])
+        logging.info(f"🧾 Все товары в заказе (items): {items}")
+        logging.info(f"📦 Кол-во товаров: {len(items)}")
 
         phone = recipient.get("phone", "").strip()
         name = recipient.get("name", "").strip()
