@@ -17,19 +17,17 @@ def vk_callback():
     data = request.get_json()
     logging.info("📥 Получен запрос от ВКонтакте: %s", data)
 
-    # Обрабатываем оба типа событий
     if data.get("type") in ["market_order_new", "market_order_edit"] and data.get("secret") == VK_SECRET:
         order = data.get("object", {})
         recipient = order.get("recipient", {})
         delivery = order.get("delivery", {})
         comment = order.get("comment", "")
 
-        # Получаем список товаров: сначала items, если он пустой — используем preview_order_items
-        items = order.get("items")
-        if not items:
-            items = order.get("preview_order_items", [])
+        # ✅ Берем preview_order_items приоритетно
+        items = order.get("preview_order_items") or order.get("items", [])
 
         logging.info(f"🔢 Кол-во товаров в заказе: {len(items)}")
+        logging.info(f"🧾 Список всех товаров: {items}")
 
         phone = recipient.get("phone", "").strip()
         name = recipient.get("name", "").strip()
@@ -48,18 +46,25 @@ def vk_callback():
         }
 
         for i, item in enumerate(items):
-            item_data = item.get("item", {}) if "item" in item else item
+            logging.info(f"🧩 Товар #{i}: {item}")
+
+            # Универсальный доступ к SKU
+            if isinstance(item, dict):
+                item_data = item.get("item", item)
+            else:
+                logging.warning(f"⚠️ Неверный формат item: {item}")
+                continue
+
             sku = str(item_data.get("sku", "")).strip()
             qty = int(item.get("quantity", 1))
 
-            logging.info(f"🕵️ Проверка товара #{i}: sku={sku}, qty={qty}")
+            if not sku:
+                logging.warning(f"⚠️ SKU не найден в товаре: {item}")
+                continue
 
-            if sku and qty > 0:
-                payload[f"product[{i}]"] = sku
-                payload[f"product_kol[{i}]"] = qty
-                logging.info(f"➕ Товар: {sku} x{qty}")
-            else:
-                logging.warning(f"⚠️ Пропущен товар: {item}")
+            logging.info(f"🕵️ Проверка товара #{i}: sku={sku}, qty={qty}")
+            payload[f"product[{i}]"] = sku
+            payload[f"product_kol[{i}]"] = qty
 
         logging.info("📦 Отправляем заказ в FrontPad...")
 
