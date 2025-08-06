@@ -15,7 +15,7 @@ VK_SECRET = os.getenv("VK_SECRET")
 @app.route("/", methods=["POST"])
 def vk_callback():
     data = request.get_json()
-    logging.info("📥 Получен запрос от ВКонтакте: %s", data)
+    logging.info("\U0001F4E5 Получен запрос от ВКонтакте: %s", data)
 
     if data.get("type") == "market_order_new" and data.get("secret") == VK_SECRET:
         order = data.get("object", {})
@@ -28,7 +28,7 @@ def vk_callback():
         name = recipient.get("name", "").strip()
         address = delivery.get("address", "").strip()
 
-        logging.info(f"📝 Комментарий из ВК: {comment}")  # 🔍 Добавлено
+        logging.info(f"\U0001F4DD Комментарий из ВК: {comment}")
 
         if not phone or not name or not address:
             logging.error("❌ Ошибка: отсутствует имя, телефон или адрес")
@@ -39,14 +39,16 @@ def vk_callback():
             "phone": phone,
             "name": name,
             "delivery_address": address,
-            "comment": comment
+            "comment": comment,
+            "note": comment,
+            "descr": comment
         }
 
         for i, item in enumerate(items):
             sku = str(item.get("item", {}).get("sku", "")).strip()
             qty = int(item.get("quantity", 1))
 
-            logging.info(f"🕵️ Проверка товара #{i}: sku={sku}, qty={qty}")
+            logging.info(f"\U0001F575️ Проверка товара #{i}: sku={sku}, qty={qty}")
 
             if sku and qty > 0:
                 payload[f"product[{i}]"] = sku
@@ -55,15 +57,15 @@ def vk_callback():
             else:
                 logging.warning(f"⚠️ Пропущен товар: {item}")
 
-        logging.info("📦 Отправляем заказ в FrontPad...")
+        logging.info("\U0001F4E6 Отправляем заказ в FrontPad...")
 
         try:
             for key, value in payload.items():
-                logging.info(f"📤 {key}: {value}")
+                logging.info(f"\U0001F4E4 {key}: {value}")
 
             response = requests.post("https://app.frontpad.ru/api/index.php?new_order", data=payload)
-            logging.info("📤 Статус ответа от FrontPad: %s", response.status_code)
-            logging.info("📤 Тело ответа от FrontPad (text): %s", response.text)
+            logging.info("\U0001F4E4 Статус ответа от FrontPad: %s", response.status_code)
+            logging.info("\U0001F4E4 Тело ответа от FrontPad (text): %s", response.text)
 
             if response.status_code == 200 and response.text != "null":
                 logging.info("✅ Заказ успешно создан во FrontPad.")
